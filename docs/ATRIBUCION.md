@@ -30,3 +30,8 @@ posterior**. Consecuencias aceptadas por el titular del repositorio:
 
 * Packs **Kenney** (`kenney.nl`, CC0 1.0, sin atribución obligatoria):
   terreno isométrico y audio que se listen en `docs/devlog/`.
+* `public/assets/terrain-sheet.png`: 10 tiles recortados (diamante 132×66) y
+  reteñidos con sharp desde `Isometric Landscape` + variantes de agua.
+  `License.txt` del pack: CC0 explícito. Terreno común con la rama A
+  (port de Fase 1) para una comparativa justa: en B solo cambian
+  edificios/personajes.
