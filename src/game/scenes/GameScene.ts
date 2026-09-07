@@ -1,5 +1,8 @@
 import Phaser from 'phaser';
+import { playSfx } from '../audio';
 import { BUILDINGS, INITIAL_STOCK, type BuildingId, type ResourceId } from '../data/buildings';
+import { BUILDING_ART } from '../data/buildingArt';
+import { PEOPLE_ROLES } from '../data/roles';
 import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
 import { tickJob, type ProductionJob, type Stock } from '../systems/economy';
 
@@ -18,15 +21,16 @@ const BUILD_TEX: Record<BuildingId, string> = {
   cuartel: 'b-cuartel', torre: 'b-torre', ornamento: 'b-ornamento',
 };
 
-const SMOKERS: Set<BuildingId> = new Set(['herreria', 'fundicion', 'panaderia', 'minaHierro', 'minaCarbon', 'cabanaLenador', 'residenciaM', 'residenciaL']);
-const GLOWERS: Set<BuildingId> = new Set(['fundicion', 'herreria', 'minaCarbon', 'minaHierro', 'minaOro', 'panaderia']);
-
 interface Placed { id: BuildingId; tx: number; ty: number; sprite: Phaser.GameObjects.Container; done: number; total: number }
+
+/** Escala de edificios PNG (canvas 128, suelo en y=118). */
+const BS = 1.0;
+const IMG_Y = -44;
 
 export class GameScene extends Phaser.Scene {
   stock: Stock = { ...INITIAL_STOCK };
   placed: Placed[] = [];
-  settlers: Phaser.GameObjects.Image[] = [];
+  settlers: Phaser.GameObjects.Sprite[] = [];
   pendingBuild: BuildingId | null = null;
   territoryRadius = 7;
   center = { x: MAP / 2, y: MAP / 2 };
@@ -46,15 +50,37 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.tilemapTiledJSON('isla-01', 'assets/maps/isla-01.json');
-    this.load.image('terreno', 'assets/terrain-sheet.png');
-    this.load.image('foam-ne', 'assets/foam-ne.png');
-    this.load.image('foam-se', 'assets/foam-se.png');
-    this.load.image('foam-sw', 'assets/foam-sw.png');
-    this.load.image('foam-nw', 'assets/foam-nw.png');
+    this.load.tilemapTiledJSON('isla-01', '/assets/maps/isla-01.json');
+    this.load.image('terreno', '/assets/terrain-sheet.png');
+    this.load.image('foam-ne', '/assets/foam-ne.png');
+    this.load.image('foam-se', '/assets/foam-se.png');
+    this.load.image('foam-sw', '/assets/foam-sw.png');
+    this.load.image('foam-nw', '/assets/foam-nw.png');
+    for (const id of Object.keys(BUILD_TEX)) {
+      this.load.image(BUILD_TEX[id as BuildingId], `/assets/buildings/${BUILD_TEX[id as BuildingId]}.png`);
+    }
+    this.load.image('mill-blades', '/assets/buildings/mill-blades.png');
+    for (const role of PEOPLE_ROLES) {
+      for (let f = 0; f < 3; f++) {
+        this.load.image(`${role}-f${f}`, `/assets/people/${role}-f${f}.png`);
+      }
+    }
+  }
+
+  private createWalkAnims() {
+    for (const role of PEOPLE_ROLES) {
+      if (this.anims.exists(`walk-${role}`)) continue;
+      this.anims.create({
+        key: `walk-${role}`,
+        frames: [{ suffix: 'f0' }, { suffix: 'f1' }, { suffix: 'f0' }, { suffix: 'f2' }].map((fr) => ({ key: `${role}-${fr.suffix}` })),
+        frameRate: 6,
+        repeat: -1,
+      });
+    }
   }
 
   create() {
+    this.createWalkAnims();
     this.buildTilemap();
     this.setupCamera();
     this.setupInput();
@@ -250,14 +276,15 @@ export class GameScene extends Phaser.Scene {
     const tx = Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-5, 5)), 3, MAP - 4);
     const ty = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-5, 5)), 3, MAP - 4);
     const { x, y } = this.iso(tx, ty);
-    const s = this.add.image(x, y - 15, tex).setDepth(8000);
+    const s = this.add.sprite(x, y - 15, `${tex}-f0`).setDepth(8000);
     s.setData('role', tex);
-    s.setScale(1.8);
+    s.setScale(1.4);
+    s.play(`walk-${tex}`);
     this.settlers.push(s);
     this.wanderRole(s);
   }
 
-  private wanderRole(s: Phaser.GameObjects.Image) {
+  private wanderRole(s: Phaser.GameObjects.Sprite) {
     if (!s.active) return;
     const role = s.getData('role') as string;
     let tx = Phaser.Math.Between(3, MAP - 4);
@@ -290,7 +317,6 @@ export class GameScene extends Phaser.Scene {
     s.setFlipX(x < s.x);
     s.setDepth(7500 + ty * 2);
     this.tweens.add({ targets: s, x, y: y - 15, duration: Phaser.Math.Between(2200, 5200), ease: 'Sine.easeInOut', onComplete: () => this.wanderRole(s) });
-    this.tweens.add({ targets: s, scaleY: 1.7, duration: 260, yoyo: true, repeat: 7 });
   }
 
   /** Coloca lo que el diseñador marcó en Tiled (capa Logica). */
@@ -304,11 +330,12 @@ export class GameScene extends Phaser.Scene {
       const edificio = o.properties?.find((p: { name: string }) => p.name === 'edificio')?.value as BuildingId | undefined;
       const oficio = o.properties?.find((p: { name: string }) => p.name === 'oficio')?.value as string | undefined;
       if (edificio && BUILDINGS[edificio]) this.tryPlace(edificio, t.x, t.y, true);
-      else if (oficio) {
+      else if (oficio && (PEOPLE_ROLES as readonly string[]).includes(oficio)) {
         const { x, y } = this.iso(t.x, t.y);
-        const s = this.add.image(x, y - 15, oficio).setDepth(8000);
+        const s = this.add.sprite(x, y - 15, `${oficio}-f0`).setDepth(8000);
         s.setData('role', oficio);
-        s.setScale(1.8);
+        s.setScale(1.4);
+        s.play(`walk-${oficio}`);
         this.settlers.push(s);
         this.wanderRole(s);
       }
@@ -339,56 +366,71 @@ export class GameScene extends Phaser.Scene {
     this.hintText.setText('');
   }
 
+  /** PNG 128 (suelo en y=118) → coords locales del contenedor. */
+  private artToLocal(px: number, py: number): { x: number; y: number } {
+    return { x: (px - 64) * BS, y: IMG_Y - (128 - py) * BS };
+  }
+
   tryPlace(id: BuildingId, tx: number, ty: number, free: boolean): boolean {
     const def = BUILDINGS[id];
+    const art = BUILDING_ART[id] ?? {};
     if (!free) {
       const ok = (Object.entries(def.coste) as [ResourceId, number][]).every(([k, v]) => this.stock[k] >= v);
       if (!ok) {
         this.hintText.setText(`⛔ Faltan recursos para ${def.nombre}`).setY(44);
+        playSfx('error');
         this.time.delayedCall(1500, () => this.hintText.setText(''));
         return false;
       }
       for (const [k, v] of Object.entries(def.coste) as [ResourceId, number][]) this.stock[k] -= v;
+      playSfx('confirm');
     }
     const { x, y } = this.iso(tx, ty);
     const depth = 6000 + ty * 4;
     const parts: Phaser.GameObjects.GameObject[] = [];
-    parts.push(this.add.image(0, -2, 'shadow').setAlpha(0.75).setScale(1.8));
+    parts.push(this.add.image(0, -2, 'shadow').setAlpha(0.75).setScale(3.0));
     this.surroundings(id, x, y, depth, parts);
-    const img = this.add.image(0, -34, BUILD_TEX[id]).setOrigin(0.5, 1).setScale(1.7);
+    const img = this.add.image(0, IMG_Y, BUILD_TEX[id]).setOrigin(0.5, 1).setScale(BS);
     parts.push(img);
-    const name = this.add.text(0, 3, def.nombre, { fontSize: '9px', color: '#fff', backgroundColor: '#00000077', padding: { x: 4, y: 2 } }).setOrigin(0.5);
+    const name = this.add.text(0, 8, def.nombre, { fontSize: '9px', color: '#fff', backgroundColor: '#00000077', padding: { x: 4, y: 2 } }).setOrigin(0.5);
     parts.push(name);
     const c = this.add.container(x, y, parts).setDepth(depth);
-    if (id === 'molino') {
-      const blades = this.add.image(58, -150, 'mill-blades').setScale(1);
+    if (art.blades) {
+      const blades = this.add.image(0, -141, 'mill-blades').setScale(0.8);
       c.add(blades);
       this.tweens.add({ targets: blades, angle: 360, duration: 5200, repeat: -1 });
     }
-    if (GLOWERS.has(id)) {
-      const glow = this.add.image(0, -52, 'glow').setAlpha(0.5).setScale(2.2);
+    for (const [gx, gy] of art.glow ?? []) {
+      const p = this.artToLocal(gx, gy);
+      const glow = this.add.image(p.x, p.y, 'glow').setAlpha(0.5).setScale(1.1);
       c.add(glow);
       this.tweens.add({ targets: glow, alpha: 0.2, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     }
-    const scaffold = this.add.image(0, -34, 'scaffold').setOrigin(0.5, 1).setAlpha(0.95).setScale(1.7);
+    const scaffold = this.add.image(0, IMG_Y, 'scaffold').setOrigin(0.5, 1).setAlpha(0.95).setScale(1.3);
     c.add(scaffold);
     img.setAlpha(0.45);
-    const worker = this.add.image(44, -12, 'carrier').setScale(1.8);
+    const worker = this.add.sprite(30, -12, 'carrier-f0').setScale(1.4);
+    worker.play('walk-carrier');
     c.add(worker);
     this.tweens.add({ targets: worker, y: -16, duration: 380, yoyo: true, repeat: 8 });
     this.drawPath(x, y, depth - 1);
     this.tweens.add({
       targets: [scaffold], alpha: 0, duration: Math.min(def.tiempoConstruccionMs, 4000),
-      onComplete: () => { scaffold.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, 1.7); },
+      onComplete: () => { scaffold.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, BS); },
     });
     this.placed.push({ id, tx, ty, sprite: c, done: 0, total: def.tiempoConstruccionMs });
-    if (SMOKERS.has(id)) this.addSmoke(x, y - 150, depth + 1);
+    if (art.smoke) {
+      const p = this.artToLocal(art.smoke[0], art.smoke[1]);
+      this.addSmoke(x + p.x, y + p.y, depth + 1);
+    }
     if (id === 'torre') this.territoryRadius += 1.5;
+    if (id === 'cuartel' && !free) playSfx('sword');
     if (id === 'cuartel') {
       for (const t of ['soldier', 'archer']) {
-        const s = this.add.image(x + 44, y - 15, t).setDepth(8000);
+        const s = this.add.sprite(x + 30, y - 15, `${t}-f0`).setDepth(8000);
         s.setData('role', t);
-        s.setScale(1.8);
+        s.setScale(1.4);
+        s.play(`walk-${t}`);
         this.settlers.push(s);
         this.wanderRole(s);
       }
@@ -403,7 +445,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private surroundings(id: BuildingId, x: number, y: number, depth: number, parts: Phaser.GameObjects.GameObject[]) {
-    const add = (tex: string, dx: number, dy: number, s = 1.7, alpha = 1) => {
+    const add = (tex: string, dx: number, dy: number, s = 1.0, alpha = 1) => {
       const p = this.add.image(dx, dy, tex).setScale(s).setAlpha(alpha);
       parts.push(p);
     };
@@ -415,12 +457,11 @@ export class GameScene extends Phaser.Scene {
       case 'residenciaS': case 'residenciaM': case 'residenciaL':
         add('fence', -62, -2); add('flowers', 52, 0); break;
       case 'granja':
-        add('fence', -68, -2); add('fence', 68, -2);
-        add('field', 0, 44, 1.7, 0.95); break;
+        add('fence', -68, -2); add('fence', 68, -2); break;
       case 'pozo': add('flowers', -44, 0); break;
       case 'fundicion': case 'herreria': add('crates', 62, -4); break;
       case 'cuartel': case 'armeria': add('fence', -64, -2); add('fence', 64, -2); break;
-      case 'torre': add('stones', 52, -2, 1.4); break;
+      case 'torre': add('stones', 52, -2, 0.8); break;
       case 'ornamento': add('flowers', -58, 0); add('flowers', 58, 0); add('tuft', -38, 2); add('tuft', 38, 2); break;
       default: break;
     }
@@ -433,7 +474,7 @@ export class GameScene extends Phaser.Scene {
     for (let i = 1; i < steps; i++) {
       const px = a.x + ((x - a.x) * i) / steps + Phaser.Math.Between(-14, 14);
       const py = a.y + ((y - a.y) * i) / steps + Phaser.Math.Between(-8, 8);
-      this.add.image(px, py + 8, 'pathdot').setDepth(depth).setAlpha(0.5).setScale(1.8);
+      this.add.image(px, py + 8, 'pathdot').setDepth(depth).setAlpha(0.5).setScale(1.2);
     }
   }
 

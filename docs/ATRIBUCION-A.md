@@ -10,9 +10,10 @@ verificadas archivo por archivo).
   solo como **referencia visual** durante el diseño y para validar el formato
   de tileset; no queda ningún PNG suyo en el repo.
 
-## Kenney (kenney.nl) — CC0 1.0 (pendiente Fase 2A: audio)
-- Audio previsto: `RPG Audio`, `Interface Sounds`, `Impact Sounds` (CC0).
-- Mención por cortesía: referencias de Kenney (www.kenney.nl).
+## Kenney (kenney.nl) — CC0 1.0 (en el repo)
+- `public/assets/audio/`: `click/select/confirm/error` (Interface Sounds),
+  `chop` + `sword` (RPG Audio). CC0 explícito.
+- Mención por cortesía: sonidos de Kenney (www.kenney.nl).
 
 ## Prohibido en esta rama
 Material GPL (Widelands) o comercial. Ver `docs/GUIA-ESTILO.md` §5.

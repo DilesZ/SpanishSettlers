@@ -1,0 +1,114 @@
+{
+  "almacen": {
+    "smoke": [
+      93,
+      28
+    ]
+  },
+  "cabanaLenador": {
+    "smoke": [
+      91,
+      36
+    ]
+  },
+  "aserradero": {},
+  "cantera": {},
+  "residenciaS": {},
+  "residenciaM": {
+    "smoke": [
+      95,
+      36
+    ]
+  },
+  "residenciaL": {
+    "smoke": [
+      37,
+      32
+    ]
+  },
+  "granja": {},
+  "molino": {
+    "blades": true
+  },
+  "panaderia": {
+    "smoke": [
+      95,
+      34
+    ],
+    "glow": [
+      [
+        44,
+        78
+      ]
+    ]
+  },
+  "pozo": {},
+  "pesqueria": {},
+  "minaCarbon": {
+    "glow": [
+      [
+        85,
+        90
+      ]
+    ]
+  },
+  "minaHierro": {
+    "glow": [
+      [
+        85,
+        90
+      ]
+    ]
+  },
+  "minaOro": {
+    "glow": [
+      [
+        85,
+        90
+      ]
+    ]
+  },
+  "fundicion": {
+    "smoke": [
+      95,
+      8
+    ],
+    "glow": [
+      [
+        42.5,
+        87.5
+      ],
+      [
+        65.5,
+        87.5
+      ],
+      [
+        88.5,
+        87.5
+      ]
+    ]
+  },
+  "herreria": {
+    "smoke": [
+      97,
+      36
+    ],
+    "glow": [
+      [
+        42,
+        78
+      ]
+    ]
+  },
+  "armeria": {},
+  "cuartel": {},
+  "torre": {
+    "glow": [
+      [
+        64,
+        52
+      ]
+    ]
+  },
+  "ornamento": {}
+}

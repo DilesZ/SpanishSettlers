@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
+import { playSfx, unlockAudio } from '@/game/audio';
 import { BUILDINGS, type BuildingId, type ResourceId } from '@/game/data/buildings';
 
 // Dynamic import: el canvas pesado solo en cliente (skill bundle-dynamic-imports).
@@ -27,6 +28,8 @@ export default function PlayPage() {
   }, []);
 
   const build = (id: BuildingId) => {
+    unlockAudio();
+    playSfx('click');
     const w = window as unknown as { __game?: { place: (id: BuildingId) => void } };
     w.__game?.place(id);
     setSelected(id);
@@ -57,14 +60,18 @@ export default function PlayPage() {
             <button
               key={id}
               onClick={() => build(id)}
-              className={`rounded-lg border p-2 text-left text-xs transition ${selected === id ? 'border-amber-300 bg-amber-300/15' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}
+              className={`flex gap-2 rounded-lg border p-2 text-left text-xs transition ${selected === id ? 'border-amber-300 bg-amber-300/15' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}
               title={BUILDINGS[id].descripcion}
             >
-              <div className="font-bold">{BUILDINGS[id].nombre}</div>
-              <div className="text-white/60">{BUILDINGS[id].descripcion}</div>
-              <div className="mt-1 text-amber-200/80">
-                {Object.entries(BUILDINGS[id].coste).map(([k, v]) => `${k}:${v}`).join(' · ') || 'gratis'}
-              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`/assets/buildings/icons/${id}.png`} alt="" width={34} height={34} className="h-[34px] w-[34px] shrink-0 rounded bg-black/40" />
+              <span>
+                <div className="font-bold">{BUILDINGS[id].nombre}</div>
+                <div className="text-white/60">{BUILDINGS[id].descripcion}</div>
+                <div className="mt-1 text-amber-200/80">
+                  {Object.entries(BUILDINGS[id].coste).map(([k, v]) => `${k}:${v}`).join(' · ') || 'gratis'}
+                </div>
+              </span>
             </button>
           ))}
         </div>
