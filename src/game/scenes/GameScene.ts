@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { playSfx } from '../audio';
 import { BUILDINGS, INITIAL_STOCK, type BuildingId, type ResourceId } from '../data/buildings';
-import { WL_BUILDINGS, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
+import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_ROCKS, WL_TREES, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
 import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
 import { tickJob, type ProductionJob, type Stock } from '../systems/economy';
 
@@ -59,12 +59,48 @@ export class GameScene extends Phaser.Scene {
           frameWidth: art.sheet.fw, frameHeight: art.sheet.fh,
         });
       }
+      if (art.build) {
+        this.load.spritesheet(`wl-buildsheet-${id}`, `/assets/wl/sheets/${art.build.file}`, {
+          frameWidth: art.build.fw, frameHeight: art.build.fh,
+        });
+      }
     }
     for (const [role, w] of Object.entries(WL_WORKERS)) {
       for (const [dir, d] of Object.entries(w.dirs)) {
         this.load.spritesheet(`wl-${role}-${dir}`, `/assets/wl/people/${d.file}`, {
           frameWidth: d.fw, frameHeight: d.fh,
         });
+      }
+      for (const [dir, d] of Object.entries(w.loads ?? {})) {
+        this.load.spritesheet(`wl-${role}-load-${dir}`, `/assets/wl/people/${d.file}`, {
+          frameWidth: d.fw, frameHeight: d.fh,
+        });
+      }
+    }
+    for (const [name, t] of Object.entries(WL_TREES)) {
+      if (t.sheet) {
+        this.load.spritesheet(`wl-tree-${name}`, `/assets/wl/nature/tree-${name}.png`, {
+          frameWidth: Math.round(t.w / t.sheet.columns), frameHeight: Math.round(t.h / t.sheet.rows),
+        });
+      } else {
+        this.load.image(`wl-tree-${name}`, `/assets/wl/nature/tree-${name}.png`);
+      }
+    }
+    for (const [name] of Object.entries(WL_ROCKS)) {
+      this.load.image(`wl-rock-${name}`, `/assets/wl/nature/rock-${name}.png`);
+    }
+    for (const [name] of Object.entries(WL_BUSHES)) {
+      this.load.image(`wl-bush-${name}`, `/assets/wl/nature/bush-${name}.png`);
+    }
+    for (const [name, c] of Object.entries(WL_CRITTERS)) {
+      for (const [dir, d] of Object.entries(c.dirs)) {
+        if (dir === 'idle') {
+          this.load.image(`wl-crit-${name}-idle`, `/assets/wl/critters/${d.file}`);
+        } else {
+          this.load.spritesheet(`wl-crit-${name}-${dir}`, `/assets/wl/critters/${d.file}`, {
+            frameWidth: d.fw, frameHeight: d.fh,
+          });
+        }
       }
     }
   }
@@ -79,6 +115,14 @@ export class GameScene extends Phaser.Scene {
         frameRate: art.sheet.fps,
         repeat: -1,
       });
+      if (art.build && !this.anims.exists(`wl-build-${id}`)) {
+        this.anims.create({
+          key: `wl-build-${id}`,
+          frames: this.anims.generateFrameNumbers(`wl-buildsheet-${id}`, { start: 0, end: art.build.frames - 1 }),
+          frameRate: art.build.fps,
+          repeat: -1,
+        });
+      }
     }
     for (const [role, w] of Object.entries(WL_WORKERS)) {
       for (const dir of Object.keys(w.dirs)) {
@@ -89,6 +133,40 @@ export class GameScene extends Phaser.Scene {
           key,
           frames: this.anims.generateFrameNumbers(`wl-${role}-${dir}`, { start: 0, end: Math.min(w.grid.frames, total) - 1 }),
           frameRate: w.grid.fps,
+          repeat: -1,
+        });
+      }
+      for (const dir of Object.keys(w.loads ?? {})) {
+        const key = `wl-walkload-${role}-${dir}`;
+        if (this.anims.exists(key)) continue;
+        const total = w.grid.columns * w.grid.rows;
+        this.anims.create({
+          key,
+          frames: this.anims.generateFrameNumbers(`wl-${role}-load-${dir}`, { start: 0, end: Math.min(w.grid.frames, total) - 1 }),
+          frameRate: w.grid.fps,
+          repeat: -1,
+        });
+      }
+    }
+    for (const [name, t] of Object.entries(WL_TREES)) {
+      if (!t.sheet || this.anims.exists(`wl-tree-${name}`)) continue;
+      this.anims.create({
+        key: `wl-tree-${name}`,
+        frames: this.anims.generateFrameNumbers(`wl-tree-${name}`, { start: 0, end: t.sheet.frames - 1 }),
+        frameRate: 2,
+        repeat: -1,
+      });
+    }
+    for (const [name, c] of Object.entries(WL_CRITTERS)) {
+      for (const dir of Object.keys(c.dirs)) {
+        if (dir === 'idle') continue;
+        const key = `wl-crit-${name}-${dir}`;
+        if (this.anims.exists(key)) continue;
+        const total = c.grid.columns * c.grid.rows;
+        this.anims.create({
+          key,
+          frames: this.anims.generateFrameNumbers(`wl-crit-${name}-${dir}`, { start: 0, end: Math.min(c.grid.frames, total) - 1 }),
+          frameRate: Math.min(c.grid.fps, 12),
           repeat: -1,
         });
       }
@@ -103,6 +181,7 @@ export class GameScene extends Phaser.Scene {
     this.placeFromLogicLayer();
     this.placeExtraInitial();
     this.spawnPopulation();
+    this.spawnCritters();
     this.setupAmbient();
     this.exposeBridge();
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.tickEconomy() });
@@ -183,14 +262,34 @@ export class GameScene extends Phaser.Scene {
     let h = (tx * 374761393 + ty * 668265263) | 0;
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     const n = ((h ^ (h >>> 16)) >>> 0) / 4294967295;
-    if (t === 'forest' && n > 0.22) {
-      const tree = this.add.image(x + Phaser.Math.Between(-20, 20), y - 28, n > 0.55 ? 'pine' : 'oak').setDepth(depth);
-      tree.setScale(1.5 + n * 0.7);
-      this.tweens.add({ targets: tree, angle: 1.1, duration: 2400 + n * 1600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    } else if (t === 'mountain' && n > 0.35) {
-      this.add.image(x, y - 18, 'rock').setDepth(depth).setScale(1.6 + n);
-    } else if ((t === 'grass' || t === 'grassB' || t === 'grassC') && n > 0.86) {
-      this.add.image(x + 16, y + 4, 'flowers').setDepth(depth).setAlpha(0.95).setScale(1.6);
+    const treeNames = Object.keys(WL_TREES);
+    const rockNames = Object.keys(WL_ROCKS);
+    const bushNames = Object.keys(WL_BUSHES);
+    if (t === 'forest' && n > 0.2 && treeNames.length) {
+      const name = treeNames[Math.floor(n * treeNames.length) % treeNames.length];
+      const art = WL_TREES[name];
+      const ox = art.hotspot[0] / art.w;
+      const oy = art.hotspot[1] / art.h;
+      if (art.sheet) {
+        const tree = this.add.sprite(x + Phaser.Math.Between(-20, 20), y - 6, `wl-tree-${name}`, 0)
+          .setOrigin(ox, oy).setDepth(depth).setScale(1.1 + n * 0.5);
+        tree.play(`wl-tree-${name}`);
+      } else {
+        this.add.image(x + Phaser.Math.Between(-20, 20), y - 6, `wl-tree-${name}`)
+          .setOrigin(ox, oy).setDepth(depth).setScale(1.1 + n * 0.5);
+      }
+    } else if (t === 'mountain' && n > 0.3 && rockNames.length) {
+      const name = rockNames[Math.floor(n * rockNames.length) % rockNames.length];
+      const art = WL_ROCKS[name];
+      this.add.image(x, y - 4, `wl-rock-${name}`)
+        .setOrigin(art.hotspot[0] / art.w, art.hotspot[1] / art.h)
+        .setDepth(depth).setScale(1.2 + n * 0.6);
+    } else if ((t === 'grass' || t === 'grassB' || t === 'grassC') && n > 0.88 && bushNames.length) {
+      const name = bushNames[Math.floor(n * bushNames.length) % bushNames.length];
+      const art = WL_BUSHES[name];
+      this.add.image(x + 14, y + 2, `wl-bush-${name}`)
+        .setOrigin(art.hotspot[0] / art.w, art.hotspot[1] / art.h)
+        .setDepth(depth).setAlpha(0.95);
     } else if (t === 'sand' && n > 0.55) {
       this.add.image(x, y - 24, 'palm').setDepth(depth).setScale(1.7 + n * 0.5);
     }
@@ -277,6 +376,55 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Fauna ambiente: conejos, ovejas, ciervos y patos en sus zonas. */
+  private spawnCritters() {
+    const crew: [string, number][] = [['bunny', 3], ['sheep', 2], ['deer', 1], ['duck', 2]];
+    for (const [name, n] of crew) {
+      const c = WL_CRITTERS[name];
+      if (!c || !c.dirs.e) continue;
+      for (let i = 0; i < n; i++) {
+        let tx = this.center.x;
+        let ty = this.center.y;
+        if (name === 'duck' && this.waterCells.length) {
+          const w = this.waterCells[Phaser.Math.Between(0, this.waterCells.length - 1)];
+          tx = Phaser.Math.Clamp(w.x + Phaser.Math.Between(-2, 2), 2, MAP - 3);
+          ty = Phaser.Math.Clamp(w.y + Phaser.Math.Between(-2, 2), 2, MAP - 3);
+        } else {
+          tx = Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-7, 7)), 2, MAP - 3);
+          ty = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-7, 7)), 2, MAP - 3);
+        }
+        const { x, y } = this.iso(tx, ty);
+        const s = this.add.sprite(x, y - 8, `wl-crit-${name}-e`, 0).setDepth(7400);
+        s.setData('critter', name);
+        s.setScale(1.1);
+        s.play(`wl-crit-${name}-e`);
+        this.wanderCritter(s);
+      }
+    }
+  }
+
+  private wanderCritter(s: Phaser.GameObjects.Sprite) {
+    if (!s.active) return;
+    const name = s.getData('critter') as string;
+    // destino cercano aleatorio (los bichos no se alejan)
+    const cur = this.groundLayer.worldToTileXY(s.x, s.y) ?? { x: this.center.x, y: this.center.y };
+    const nx = Phaser.Math.Clamp(cur.x + Phaser.Math.Between(-3, 3), 2, MAP - 3);
+    const ny = Phaser.Math.Clamp(cur.y + Phaser.Math.Between(-3, 3), 2, MAP - 3);
+    const { x, y } = this.iso(nx, ny);
+    const dir = x >= s.x ? 'e' : 'w';
+    const key = `wl-crit-${name}-${dir}`;
+    if (WL_CRITTERS[name]?.dirs[dir as 'e' | 'w'] && this.anims.exists(key)) {
+      s.setTexture(key);
+      s.play(key);
+    }
+    s.setDepth(7400 + ny);
+    this.tweens.add({
+      targets: s, x, y: y - 8,
+      duration: name === 'bunny' ? Phaser.Math.Between(900, 1600) : Phaser.Math.Between(2500, 5000),
+      ease: 'Sine.easeInOut', onComplete: () => this.wanderCritter(s),
+    });
+  }
+
   private pickTile(list: { x: number; y: number }[], nearX: number, nearY: number, maxD: number): { x: number; y: number } {
     let best = { x: Math.round(nearX), y: Math.round(nearY) };
     let bestD = Infinity;
@@ -333,11 +481,14 @@ export class GameScene extends Phaser.Scene {
       ty = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-6, 6)), 2, MAP - 3);
     }
     const { x, y } = this.iso(tx, ty);
-    // dirección este/oeste según el destino (los sheets son direccionales)
+    // dirección este/oeste según el destino (los sheets son direccionales);
+    // los portadores alternan vacío/cargado para que se vea el acarreo
     const dir = x >= s.x ? 'e' : 'w';
-    if (WL_WORKERS[role]?.dirs[dir as 'e' | 'w']) {
-      s.setTexture(`wl-${role}-${dir}`);
-      s.play(`wl-walk-${role}-${dir}`);
+    const loaded = role === 'carrier' && WL_WORKERS[role]?.loads?.[dir as 'e' | 'w'] && Math.random() > 0.5;
+    const key = loaded ? `wl-walkload-${role}-${dir}` : `wl-walk-${role}-${dir}`;
+    if ((loaded || WL_WORKERS[role]?.dirs[dir as 'e' | 'w']) && this.anims.exists(key)) {
+      s.setTexture(loaded ? `wl-${role}-load-${dir}` : `wl-${role}-${dir}`);
+      s.play(key);
     }
     s.setDepth(7500 + ty * 2);
     this.tweens.add({ targets: s, x, y: y - 15, duration: Phaser.Math.Between(2200, 5200), ease: 'Sine.easeInOut', onComplete: () => this.wanderRole(s) });
@@ -426,16 +577,30 @@ export class GameScene extends Phaser.Scene {
     const name = this.add.text(0, 10, def.nombre, { fontSize: '9px', color: '#fff', backgroundColor: '#00000077', padding: { x: 4, y: 2 } }).setOrigin(0.5);
     parts.push(name);
     const c = this.add.container(x, y, parts).setDepth(depth);
-    const scaffold = this.add.image(0, -44, 'scaffold').setOrigin(0.5, 1).setAlpha(0.95).setScale(1.3);
-    c.add(scaffold);
-    img.setAlpha(0.45);
+    img.setAlpha(0); // se revela al terminar la obra
+    // Etapa de obra: si hay sheet de construcción oficial se muestra creciendo;
+    // si no, andamio procedural + edificio atenuado.
+    let buildFx: Phaser.GameObjects.GameObject | null = null;
+    if (art.build) {
+      const b = art.build;
+      const bs = this.add.sprite(0, 0, `wl-buildsheet-${id}`, 0)
+        .setOrigin(b.hotspot[0] / b.fw, b.hotspot[1] / b.fh).setScale(scale);
+      bs.play(`wl-build-${id}`);
+      c.add(bs);
+      buildFx = bs;
+    } else {
+      const scaffold = this.add.image(0, -44, 'scaffold').setOrigin(0.5, 1).setAlpha(0.95).setScale(1.3);
+      c.add(scaffold);
+      img.setAlpha(0.45);
+      buildFx = scaffold;
+    }
     const worker = this.add.image(30, -12, 'wl-carrier-e', 4).setScale(wlWorkerScale(42));
     c.add(worker);
     this.tweens.add({ targets: worker, y: -16, duration: 380, yoyo: true, repeat: 8 });
     this.drawPath(x, y, depth - 1);
     this.tweens.add({
-      targets: [scaffold], alpha: 0, duration: Math.min(def.tiempoConstruccionMs, 4000),
-      onComplete: () => { scaffold.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, scale); },
+      targets: buildFx ? [buildFx] : [], alpha: 0, duration: Math.min(def.tiempoConstruccionMs, 4000),
+      onComplete: () => { buildFx?.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, scale); },
     });
     this.placed.push({ id, tx, ty, sprite: c, done: 0, total: def.tiempoConstruccionMs });
     if (WL_SMOKE.has(id)) this.addSmoke(x, y - art.h * scale * 0.85, depth + 1);

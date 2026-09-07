@@ -46,7 +46,11 @@ export default function PlayPage() {
       {stock && (
         <div className="flex flex-wrap gap-2 px-4 py-2 text-xs">
           {(Object.entries(stock) as [ResourceId, number][]).map(([k, v]) => (
-            <span key={k} className="rounded-full bg-white/10 px-2 py-1">{k}: <b>{v}</b></span>
+            <span key={k} className="flex items-center gap-1 rounded-full bg-white/10 px-2 py-1">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`/assets/wl/icons/res-${k}.png`} alt={k} width={16} height={16} className="h-4 w-4" />
+              <b>{v}</b>
+            </span>
           ))}
         </div>
       )}

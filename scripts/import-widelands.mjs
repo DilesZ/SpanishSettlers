@@ -42,6 +42,25 @@ const WORKER_MAP = {
   archer: 'hunter', miner: 'miner', fisher: 'fisher', baker: 'baker',
 };
 
+// Extrae el bloque `name = {...}` balanceando llaves (tolera hotspot interno)
+const blockOf = (lua, name) => {
+  const i = lua.indexOf(`${name} = {`);
+  if (i < 0) return null;
+  let depth = 0;
+  for (let j = i + name.length + 3; j < lua.length; j++) {
+    if (lua[j] === '{') depth++;
+    else if (lua[j] === '}') {
+      depth--;
+      if (depth === 0) return lua.slice(i, j + 1);
+    }
+  }
+  return null;
+};
+const getNum = (block, k) => {
+  if (!block) return null;
+  const r = block.match(new RegExp(k + `\\s*=\\s*(\\d+)`));
+  return r ? parseInt(r[1]) : null;
+};
 const fail = [];
 mkdirSync(join(OUT, 'icons'), { recursive: true });
 mkdirSync(join(OUT, 'people'), { recursive: true });
@@ -111,38 +130,148 @@ for (const [id, dir] of Object.entries(BUILD_MAP)) {
 }
 
 const workers = {};
+const LOADS = new Set(['carrier']);
 for (const [role, worker] of Object.entries(WORKER_MAP)) {
   const src = join(WL, 'workers/barbarians', worker);
   const lua = join(src, 'init.lua');
   if (!existsSync(lua)) { fail.push(`worker ${role}: falta ${worker}`); continue; }
   const grid = sheetOf(readFileSync(lua, 'utf8'), 'walk') ?? { fps: 10, frames: 10, columns: 3, rows: 4 };
-  const entry = { worker, grid, dirs: {} };
-  for (const d of ['e', 'w']) {
-    let file = null;
-    for (const s of ['2', '1', '0.5']) {
-      const cand = join(src, `walk_${d}_${s}.png`);
-      if (existsSync(cand)) { file = cand; break; }
+  const entry = { worker, grid, dirs: {}, loads: {} };
+  const kinds = LOADS.has(role) ? [['', 'dirs', 'walk'], ['load-', 'loads', 'walkload']] : [['', 'dirs', 'walk']];
+  for (const [prefix, slot, base] of kinds) {
+    for (const d of ['e', 'w']) {
+      let file = null;
+      for (const s of ['2', '1', '0.5']) {
+        const cand = join(src, `${base}_${d}_${s}.png`);
+        if (existsSync(cand)) { file = cand; break; }
+      }
+      if (!file) { fail.push(`worker ${role}: sin ${base}_${d}`); continue; }
+      const meta = await sharp(file).metadata();
+      const fw = Math.round(meta.width / grid.columns);
+      const rh = Math.round(meta.height / grid.rows);
+      copyFileSync(file, join(OUT, 'people', `${role}-${prefix}${d}.png`));
+      entry[slot][d] = { file: `${role}-${prefix}${d}.png`, w: meta.width, h: meta.height, fw, fh: rh };
     }
-    if (!file) { fail.push(`worker ${role}: sin walk_${d}`); continue; }
-    const meta = await sharp(file).metadata();
-    const fw = Math.round(meta.width / grid.columns);
-    const rh = Math.round(meta.height / grid.rows);
-    copyFileSync(file, join(OUT, 'people', `${role}-${d}.png`));
-    entry.dirs[d] = { file: `${role}-${d}.png`, w: meta.width, h: meta.height, fw, fh: rh };
   }
   workers[role] = entry;
 }
 
-writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ buildings, workers }, null, 2));
+const WLW = 'C:/Users/PC CASA/AppData/Local/Temp/opencode/widelands/data/world';
+mkdirSync(join(OUT, 'nature'), { recursive: true });
+mkdirSync(join(OUT, 'critters'), { recursive: true });
+
+// --- Naturaleza: árboles (etapa mature), rocas greenland, arbustos ---
+const nature = { trees: {}, rocks: {}, bushes: {} };
+for (const t of ['alder', 'birch', 'beech']) {
+  const dir = join(WLW, 'immovables/trees', t, 'mature');
+  const lua = join(dir, 'init.lua');
+  const img = join(dir, 'mature_1.png');
+  if (!existsSync(lua) || !existsSync(img)) { fail.push(`arbol ${t}`); continue; }
+  const text = readFileSync(lua, 'utf8');
+  // sheet si hay metadatos (balanceo del árbol), si no frame único
+  const blk = blockOf(text, 'idle');
+  copyFileSync(img, join(OUT, 'nature', `tree-${t}.png`));
+  const meta = await sharp(img).metadata();
+  const sheet = blk && getNum(blk, 'frames') && getNum(blk, 'columns') && getNum(blk, 'rows')
+    ? { fps: getNum(blk, 'fps') ?? 8, frames: getNum(blk, 'frames'), columns: getNum(blk, 'columns'), rows: getNum(blk, 'rows') }
+    : null;
+  nature.trees[t] = { w: meta.width, h: meta.height, hotspot: hotspotOf(text) ?? [Math.round(meta.width / 2), meta.height], sheet };
+}
+for (let i = 1; i <= 6; i++) {
+  const dir = join(WLW, `immovables/rocks/greenland/${i}`);
+  const lua = join(dir, 'init.lua');
+  if (!existsSync(lua)) { fail.push(`roca ${i}`); continue; }
+  const text = readFileSync(lua, 'utf8');
+  const bm = text.match(/basename\s*=\s*"([^"]+)"/);
+  const img = join(dir, `${bm ? bm[1] : 'rocks' + i}.png`);
+  if (!existsSync(img)) { fail.push(`roca ${i}: sin png`); continue; }
+  copyFileSync(img, join(OUT, 'nature', `rock-${i}.png`));
+  const meta = await sharp(img).metadata();
+  nature.rocks[i] = { w: meta.width, h: meta.height, hotspot: hotspotOf(text) ?? [Math.round(meta.width / 2), meta.height] };
+}
+for (let i = 1; i <= 5; i++) {
+  const dir = join(WLW, `immovables/plants/bush${i}`);
+  const lua = join(dir, 'init.lua');
+  const img = join(dir, 'idle.png');
+  if (!existsSync(lua) || !existsSync(img)) { fail.push(`arbusto ${i}`); continue; }
+  copyFileSync(img, join(OUT, 'nature', `bush-${i}.png`));
+  const meta = await sharp(img).metadata();
+  nature.bushes[i] = { w: meta.width, h: meta.height, hotspot: hotspotOf(readFileSync(lua, 'utf8')) ?? [Math.round(meta.width / 2), meta.height] };
+}
+
+// --- Critters: mismo formato que workers ---
+const critters = {};
+for (const n of ['bunny', 'deer', 'sheep', 'duck']) {
+  const src = join(WLW, 'critters', n);
+  const lua = join(src, 'init.lua');
+  if (!existsSync(lua)) { fail.push(`critter ${n}`); continue; }
+  const grid = sheetOf(readFileSync(lua, 'utf8'), 'walk') ?? { fps: 8, frames: 8, columns: 3, rows: 4 };
+  const entry = { grid, dirs: {} };
+  for (const d of ['e', 'w', 'idle']) {
+    const cand = d === 'idle' ? join(src, 'idle.png') : ['2', '1', '0.5', '00'].map((s) => join(src, `walk_${d}_${s}.png`)).find((f) => existsSync(f));
+    if (!cand || !existsSync(cand)) continue;
+    const meta = await sharp(cand).metadata();
+    const fw = d === 'idle' ? meta.width : Math.round(meta.width / grid.columns);
+    const fh = d === 'idle' ? meta.height : Math.round(meta.height / grid.rows);
+    copyFileSync(cand, join(OUT, 'critters', `${n}-${d}.png`));
+    entry.dirs[d] = { file: `${n}-${d}.png`, w: meta.width, h: meta.height, fw, fh };
+  }
+  critters[n] = entry;
+}
+
+// --- Iconos de recursos para el HUD ---
+const RES_ICONS = {
+  madera: 'log', tablon: 'planks', piedra: 'granite', grano: 'wheat', harina: 'flour',
+  pan: 'bread_barbarians', agua: 'water', pez: 'fish', carbon: 'coal', hierro: 'iron_ore',
+  lingoteHierro: 'iron', oro: 'gold_ore', lingoteOro: 'gold', herramienta: 'shovel',
+  espada: 'sword_short', arco: 'hunting_bow',
+};
+const resIcons = {};
+for (const [res, ware] of Object.entries(RES_ICONS)) {
+  const menu = join(WL, 'wares', ware, 'menu.png');
+  if (!existsSync(menu)) { fail.push(`icono ${res} (${ware})`); continue; }
+  copyFileSync(menu, join(OUT, 'icons', `res-${res}.png`));
+  resIcons[res] = `res-${res}.png`;
+}
+
+// --- Etapas de construcción: build_1.png + metadatos build ---
+for (const [id, dir] of Object.entries(BUILD_MAP)) {
+  const src = join(WL, dir);
+  const lua = join(src, 'init.lua');
+  const sheet = join(src, 'build_1.png');
+  if (!existsSync(lua) || !existsSync(sheet)) continue;
+  const text = readFileSync(lua, 'utf8');
+  const m = text.match(/build\s*=\s*\{([^}]*)\}/s);
+  if (!m) continue;
+  const get = (k) => { const r = m[1].match(new RegExp(k + `\\s*=\\s*(\\d+)`)); return r ? parseInt(r[1]) : null; };
+  const frames = get('frames'), columns = get('columns'), rows = get('rows');
+  if (!frames || !columns || !rows) continue;
+  const meta = await sharp(sheet).metadata();
+  copyFileSync(sheet, join(OUT, 'sheets', `${id}-build.png`));
+  buildings[id].build = {
+    file: `${id}-build.png`, fw: Math.round(meta.width / columns), fh: Math.round(meta.height / rows),
+    frames, fps: get('fps') ?? 6, hotspot: hotspotOf(text) ?? buildings[id].hotspot,
+  };
+}
+
+writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ buildings, workers, nature, critters, resIcons }, null, 2));
 const ts =
   `// Generado por scripts/import-widelands.mjs — NO EDITAR A MANO.\n` +
   `// Arte GPL-2.0+ de Widelands (ver docs/ATRIBUCION.md).\n` +
   `export interface WlSheet { file: string; fw: number; fh: number; frames: number; fps: number }\n` +
-  `export interface WlBuilding { w: number; h: number; hotspot: [number, number]; src: string; mode?: 'sheet'; sheet?: WlSheet }\n` +
+  `export interface WlBuilding { w: number; h: number; hotspot: [number, number]; src: string; mode?: 'sheet'; sheet?: WlSheet; build?: WlSheet & { hotspot: [number, number] } }\n` +
   `export interface WlWorkerDir { file: string; w: number; h: number; fw: number; fh: number }\n` +
-  `export interface WlWorker { worker: string; grid: { fps: number; frames: number; columns: number; rows: number }; dirs: Partial<Record<'e' | 'w', WlWorkerDir>> }\n` +
+  `export interface WlWorker { worker: string; grid: { fps: number; frames: number; columns: number; rows: number }; dirs: Partial<Record<'e' | 'w', WlWorkerDir>>; loads?: Partial<Record<'e' | 'w', WlWorkerDir>> }\n` +
   `export const WL_BUILDINGS: Record<string, WlBuilding> = ${JSON.stringify(buildings)};\n` +
   `export const WL_WORKERS: Record<string, WlWorker> = ${JSON.stringify(workers)};\n` +
+  `export interface WlNatureItem { w: number; h: number; hotspot: [number, number]; sheet?: { fps: number; columns: number; rows: number; frames: number } | null }\n` +
+  `export const WL_TREES: Record<string, WlNatureItem> = ${JSON.stringify(nature.trees)};\n` +
+  `export const WL_ROCKS: Record<string, WlNatureItem> = ${JSON.stringify(nature.rocks)};\n` +
+  `export const WL_BUSHES: Record<string, WlNatureItem> = ${JSON.stringify(nature.bushes)};\n` +
+  `export interface WlCritterDir { file: string; w: number; h: number; fw: number; fh: number }\n` +
+  `export interface WlCritter { grid: { fps: number; frames: number; columns: number; rows: number }; dirs: Record<string, WlCritterDir> }\n` +
+  `export const WL_CRITTERS: Record<string, WlCritter> = ${JSON.stringify(critters)};\n` +
+  `export const WL_RES_ICONS: Record<string, string> = ${JSON.stringify(resIcons)};\n` +
   `/** Escala para que el edificio ocupe ~1 loseta sin empequeñecer minis. */\n` +
   `export function wlBuildingScale(w: number, h: number): number {\n` +
   `  return Math.min(2.4, Math.max(0.85, 110 / Math.max(w, h)));\n` +

@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 
-// BootScene (Fase 2A): solo decoración procedural + FX genéricos.
-// Edificios, colonos y terreno vienen de PNG (scripts/make-*.mjs + Tiled).
-// Todo original, sin assets de terceros.
+// BootScene (rama B): FX y props genéricos originales.
+// Bosques, rocas y arbustos son Widelands (GPL); edificios/colonos, PNG.
+// Solo quedan procedurales: palmera, tocón, sombra, props, nubes, FX.
 export class BootScene extends Phaser.Scene {
   constructor() {
     super('boot');
@@ -17,34 +17,6 @@ export class BootScene extends Phaser.Scene {
 
   private makeNature() {
     let g = this.make.graphics({ x: 0, y: 0 }, false);
-    g.fillStyle(0x5b3a1e, 1);
-    g.fillRect(14, 30, 5, 9);
-    const greens = [0x24511f, 0x2e6428, 0x3a7a33];
-    const tiers: [number, number, number][] = [[4, 32, 28], [7, 24, 22], [10, 15, 15]];
-    tiers.forEach(([x, y, w], i) => {
-      g.fillStyle(greens[i], 1);
-      g.fillTriangle(x, y, x + w, y, x + w / 2, y - 13);
-    });
-    g.fillStyle(0x4c9a45, 1);
-    g.fillTriangle(13, 20, 19, 20, 16, 12);
-    g.generateTexture('pine', 34, 42);
-    g.destroy();
-
-    g = this.make.graphics({ x: 0, y: 0 }, false);
-    g.fillStyle(0x5b3a1e, 1);
-    g.fillRect(15, 26, 5, 12);
-    g.fillStyle(0x3a7a33, 1);
-    g.fillCircle(17, 15, 13);
-    g.fillStyle(0x4c9a45, 1);
-    g.fillCircle(12, 11, 7);
-    g.fillCircle(22, 12, 6);
-    g.fillStyle(0xd94f3d, 1);
-    g.fillCircle(10, 14, 1.6);
-    g.fillCircle(23, 17, 1.6);
-    g.generateTexture('oak', 36, 40);
-    g.destroy();
-
-    g = this.make.graphics({ x: 0, y: 0 }, false);
     g.fillStyle(0x8a6538, 1);
     g.fillTriangle(15, 36, 19, 36, 16, 12);
     g.fillStyle(0x3f8f3f, 1);
@@ -56,29 +28,6 @@ export class BootScene extends Phaser.Scene {
     g.fillCircle(14, 13, 2.2);
     g.fillCircle(18, 13, 2.2);
     g.generateTexture('palm', 34, 38);
-    g.destroy();
-
-    g = this.make.graphics({ x: 0, y: 0 }, false);
-    g.fillStyle(0x000000, 0.22);
-    g.fillEllipse(17, 30, 27, 8);
-    g.fillStyle(0x6e737c, 1);
-    g.fillTriangle(5, 30, 29, 30, 17, 9);
-    g.fillStyle(0x9aa0aa, 1);
-    g.fillTriangle(17, 9, 29, 30, 19, 30);
-    g.fillStyle(0xeef1f4, 1);
-    g.fillTriangle(17, 9, 23, 19, 17, 19);
-    g.generateTexture('rock', 34, 34);
-    g.destroy();
-
-    g = this.make.graphics({ x: 0, y: 0 }, false);
-    g.fillStyle(0x3a7a33, 1);
-    g.fillTriangle(3, 15, 5, 15, 4, 5);
-    g.fillTriangle(13, 15, 15, 15, 14, 4);
-    g.fillStyle(0xf472b6, 1);
-    g.fillCircle(17, 7, 2.2);
-    g.fillStyle(0xfde68a, 1);
-    g.fillCircle(17, 7, 1);
-    g.generateTexture('flowers', 24, 17);
     g.destroy();
 
     g = this.make.graphics({ x: 0, y: 0 }, false);
