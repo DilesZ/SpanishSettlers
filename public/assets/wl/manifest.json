@@ -883,5 +883,82 @@
     "herramienta": "res-herramienta.png",
     "espada": "res-espada.png",
     "arco": "res-arco.png"
+  },
+  "wheat": {
+    "tiny": {
+      "file": "wheat-tiny.png",
+      "w": 370,
+      "h": 50,
+      "fw": 74,
+      "fh": 50,
+      "fps": 8,
+      "frames": 5,
+      "columns": 5,
+      "rows": 1,
+      "hotspot": [
+        36,
+        27
+      ]
+    },
+    "small": {
+      "file": "wheat-small.png",
+      "w": 370,
+      "h": 50,
+      "fw": 74,
+      "fh": 50,
+      "fps": 8,
+      "frames": 5,
+      "columns": 5,
+      "rows": 1,
+      "hotspot": [
+        36,
+        27
+      ]
+    },
+    "medium": {
+      "file": "wheat-medium.png",
+      "w": 370,
+      "h": 50,
+      "fw": 74,
+      "fh": 50,
+      "fps": 8,
+      "frames": 5,
+      "columns": 5,
+      "rows": 1,
+      "hotspot": [
+        36,
+        27
+      ]
+    },
+    "ripe": {
+      "file": "wheat-ripe.png",
+      "w": 370,
+      "h": 50,
+      "fw": 74,
+      "fh": 50,
+      "fps": 8,
+      "frames": 5,
+      "columns": 5,
+      "rows": 1,
+      "hotspot": [
+        36,
+        27
+      ]
+    },
+    "harvested": {
+      "file": "wheat-harvested.png",
+      "w": 370,
+      "h": 50,
+      "fw": 74,
+      "fh": 50,
+      "fps": 8,
+      "frames": 5,
+      "columns": 5,
+      "rows": 1,
+      "hotspot": [
+        36,
+        27
+      ]
+    }
   }
 }

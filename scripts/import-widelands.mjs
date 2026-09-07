@@ -219,6 +219,26 @@ for (const n of ['bunny', 'deer', 'sheep', 'duck']) {
   critters[n] = entry;
 }
 
+// --- Trigo por etapas (tiny/small/medium/ripe/harvested) para granjas vivas ---
+const wheat = {};
+mkdirSync(join(OUT, 'crops'), { recursive: true });
+for (const stage of ['tiny', 'small', 'medium', 'ripe', 'harvested']) {
+  const dir = join(WL, 'immovables/wheatfield', stage);
+  const lua = join(dir, 'init.lua');
+  const img = join(dir, 'idle_1.png');
+  if (!existsSync(lua) || !existsSync(img)) { fail.push(`trigo ${stage}`); continue; }
+  const text = readFileSync(lua, 'utf8');
+  const blk = blockOf(text, 'idle');
+  const grid = blk ? { fps: getNum(blk, 'fps') ?? 8, frames: getNum(blk, 'frames') ?? 1, columns: getNum(blk, 'columns') ?? 1, rows: getNum(blk, 'rows') ?? 1 } : { fps: 8, frames: 1, columns: 1, rows: 1 };
+  const meta = await sharp(img).metadata();
+  copyFileSync(img, join(OUT, 'crops', `wheat-${stage}.png`));
+  wheat[stage] = {
+    file: `wheat-${stage}.png`, w: meta.width, h: meta.height,
+    fw: Math.round(meta.width / grid.columns), fh: Math.round(meta.height / grid.rows),
+    ...grid, hotspot: hotspotOf(text) ?? [Math.round(meta.width / 2), meta.height],
+  };
+}
+
 // --- Iconos de recursos para el HUD ---
 const RES_ICONS = {
   madera: 'log', tablon: 'planks', piedra: 'granite', grano: 'wheat', harina: 'flour',
@@ -254,7 +274,7 @@ for (const [id, dir] of Object.entries(BUILD_MAP)) {
   };
 }
 
-writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ buildings, workers, nature, critters, resIcons }, null, 2));
+writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ buildings, workers, nature, critters, resIcons, wheat }, null, 2));
 const ts =
   `// Generado por scripts/import-widelands.mjs — NO EDITAR A MANO.\n` +
   `// Arte GPL-2.0+ de Widelands (ver docs/ATRIBUCION.md).\n` +
@@ -271,6 +291,9 @@ const ts =
   `export interface WlCritterDir { file: string; w: number; h: number; fw: number; fh: number }\n` +
   `export interface WlCritter { grid: { fps: number; frames: number; columns: number; rows: number }; dirs: Record<string, WlCritterDir> }\n` +
   `export const WL_CRITTERS: Record<string, WlCritter> = ${JSON.stringify(critters)};\n` +
+  `export interface WlWheatStage { file: string; w: number; h: number; fw: number; fh: number; fps: number; frames: number; columns: number; rows: number; hotspot: [number, number] }\n` +
+  `export const WL_WHEAT: Record<string, WlWheatStage> = ${JSON.stringify(wheat)};\n` +
+  `export const WL_WHEAT_ORDER = ['tiny', 'small', 'medium', 'ripe'];\n` +
   `export const WL_RES_ICONS: Record<string, string> = ${JSON.stringify(resIcons)};\n` +
   `/** Escala para que el edificio ocupe ~1 loseta sin empequeñecer minis. */\n` +
   `export function wlBuildingScale(w: number, h: number): number {\n` +

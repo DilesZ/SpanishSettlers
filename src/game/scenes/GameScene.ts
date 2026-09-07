@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { playSfx } from '../audio';
 import { BUILDINGS, INITIAL_STOCK, type BuildingId, type ResourceId } from '../data/buildings';
-import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_ROCKS, WL_TREES, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
+import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_ROCKS, WL_TREES, WL_WHEAT, WL_WHEAT_ORDER, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
+import { DAY_LENGTH_MS, skyAt } from '../systems/daynight';
 import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
 import { tickJob, type ProductionJob, type Stock } from '../systems/economy';
 
@@ -38,6 +39,9 @@ export class GameScene extends Phaser.Scene {
   private hillTiles: { x: number; y: number }[] = [];
   private hoverMarker!: Phaser.GameObjects.Graphics;
   private minimap?: Phaser.Cameras.Scene2D.Camera;
+  private wheatPlots: { sprite: Phaser.GameObjects.Sprite; stageIdx: number }[] = [];
+  private stars: Phaser.GameObjects.Arc[] = [];
+  private lanterns: Phaser.GameObjects.Image[] = [];
 
   constructor() {
     super('game');
@@ -102,6 +106,11 @@ export class GameScene extends Phaser.Scene {
           });
         }
       }
+    }
+    for (const [stage, w] of Object.entries(WL_WHEAT)) {
+      this.load.spritesheet(`wl-wheat-${stage}`, `/assets/wl/crops/${w.file}`, {
+        frameWidth: w.fw, frameHeight: w.fh,
+      });
     }
   }
 
@@ -171,6 +180,17 @@ export class GameScene extends Phaser.Scene {
         });
       }
     }
+    for (const [stage, w] of Object.entries(WL_WHEAT)) {
+      const key = `wl-wheat-${stage}`;
+      if (this.anims.exists(key)) continue;
+      const total = w.columns * w.rows;
+      this.anims.create({
+        key,
+        frames: this.anims.generateFrameNumbers(`wl-wheat-${stage}`, { start: 0, end: Math.min(w.frames, total) - 1 }),
+        frameRate: Math.min(w.fps, 6),
+        repeat: -1,
+      });
+    }
   }
 
   create() {
@@ -183,9 +203,12 @@ export class GameScene extends Phaser.Scene {
     this.spawnPopulation();
     this.spawnCritters();
     this.setupAmbient();
+    this.setupNight();
     this.exposeBridge();
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.tickEconomy() });
     this.time.addEvent({ delay: 700, loop: true, callback: () => this.animateWater() });
+    this.time.addEvent({ delay: 6000, loop: true, callback: () => this.wheatTick() });
+    this.time.addEvent({ delay: 1000, loop: true, callback: () => this.skyTick() });
     this.scale.on('resize', () => this.layoutMinimap());
   }
 
@@ -376,6 +399,79 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Estrellas + faroles (el tinte va en un div HTML: ver GameCanvas). */
+  private setupNight() {
+    for (let i = 0; i < 80; i++) {
+      const sx = Phaser.Math.Between(-1600, 1600);
+      const sy = Phaser.Math.Between(-500, 1100);
+      const st = this.add.circle(sx, sy, Math.random() * 1.6 + 0.5, 0xffffff, 0)
+        .setDepth(9601);
+      this.stars.push(st);
+    }
+    if (this.minimap) {
+      this.minimap.ignore([this.hudText, this.hintText]);
+    }
+    this.skyTick();
+  }
+
+  private skyTick() {
+    let elapsed = this.time.now;
+    let forceDay = false;
+    try {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get('noche') === '1') {
+        elapsed = DAY_LENGTH_MS * 0.75; // medianoche fija para fotos y curiosos
+      }
+      forceDay = q.get('dia') === '1';
+    } catch { /* sin window en SSR: nunca ocurre aquí */ }
+    const s = skyAt(elapsed, DAY_LENGTH_MS);
+    if (forceDay) {
+      s.overlayAlpha = 0;
+      s.lanternAlpha = 0;
+      s.starsAlpha = 0;
+    }
+    // el div HTML de GameCanvas lee esto para el tinte (evita misterios de cámara)
+    (window as unknown as { __sky?: object }).__sky = { color: s.overlayColor, alpha: s.overlayAlpha };
+    for (const st of this.stars) st.setAlpha(s.starsAlpha * (0.4 + Math.random() * 0.6));
+    for (const l of this.lanterns) l.setAlpha(s.lanternAlpha);
+  }
+
+  /** Parcelas de trigo alrededor de cada granja: crecen y se cosechan (+1 grano). */
+  private plantWheat(x: number, y: number, depth: number) {
+    const spots: [number, number][] = [[-72, 14], [0, 30], [72, 14]];
+    for (const [dx, dy] of spots) {
+      const stage = WL_WHEAT_ORDER[0];
+      const art = WL_WHEAT[stage];
+      if (!art) continue;
+      const sp = this.add.sprite(x + dx, y + dy, `wl-wheat-${stage}`, 0)
+        .setOrigin(art.hotspot[0] / art.fw, art.hotspot[1] / art.fh).setDepth(depth - 2);
+      sp.play(`wl-wheat-${stage}`);
+      this.wheatPlots.push({ sprite: sp, stageIdx: 0 });
+    }
+  }
+
+  private wheatTick() {
+    let harvested = 0;
+    for (const p of this.wheatPlots) {
+      if (!p.sprite.active) continue;
+      p.stageIdx++;
+      if (p.stageIdx >= WL_WHEAT_ORDER.length) {
+        p.stageIdx = 0;
+        harvested++;
+      }
+      const stage = WL_WHEAT_ORDER[p.stageIdx];
+      const art = WL_WHEAT[stage];
+      if (!art) continue;
+      p.sprite.setTexture(`wl-wheat-${stage}`, 0);
+      p.sprite.setOrigin(art.hotspot[0] / art.fw, art.hotspot[1] / art.fh);
+      p.sprite.play(`wl-wheat-${stage}`);
+    }
+    if (harvested > 0) {
+      this.stock.grano += harvested;
+      this.updateHud();
+    }
+  }
+
   /** Fauna ambiente: conejos, ovejas, ciervos y patos en sus zonas. */
   private spawnCritters() {
     const crew: [string, number][] = [['bunny', 3], ['sheep', 2], ['deer', 1], ['duck', 2]];
@@ -408,8 +504,16 @@ export class GameScene extends Phaser.Scene {
     const name = s.getData('critter') as string;
     // destino cercano aleatorio (los bichos no se alejan)
     const cur = this.groundLayer.worldToTileXY(s.x, s.y) ?? { x: this.center.x, y: this.center.y };
-    const nx = Phaser.Math.Clamp(cur.x + Phaser.Math.Between(-3, 3), 2, MAP - 3);
-    const ny = Phaser.Math.Clamp(cur.y + Phaser.Math.Between(-3, 3), 2, MAP - 3);
+    let nx = Phaser.Math.Clamp(cur.x + Phaser.Math.Between(-3, 3), 2, MAP - 3);
+    let ny = Phaser.Math.Clamp(cur.y + Phaser.Math.Between(-3, 3), 2, MAP - 3);
+    if (name !== 'duck') {
+      // los terrestres evitan el agua (los patos sí nadan)
+      const t = terrainAt(nx, ny);
+      if (t === 'water' || t === 'waterB' || t === 'waterC') {
+        nx = Phaser.Math.Clamp(cur.x + Phaser.Math.Between(-3, 3), 2, MAP - 3);
+        ny = Phaser.Math.Clamp(cur.y + Phaser.Math.Between(-3, 3), 2, MAP - 3);
+      }
+    }
     const { x, y } = this.iso(nx, ny);
     const dir = x >= s.x ? 'e' : 'w';
     const key = `wl-crit-${name}-${dir}`;
@@ -604,6 +708,11 @@ export class GameScene extends Phaser.Scene {
     });
     this.placed.push({ id, tx, ty, sprite: c, done: 0, total: def.tiempoConstruccionMs });
     if (WL_SMOKE.has(id)) this.addSmoke(x, y - art.h * scale * 0.85, depth + 1);
+    if (id === 'granja') this.plantWheat(x, y, depth);
+    // farol nocturno sobre la puerta
+    const lamp = this.add.image(x, y - art.h * scale * 0.55, 'glow')
+      .setDepth(depth + 2).setScale(0.9).setAlpha(0).setBlendMode(Phaser.BlendModes.ADD);
+    this.lanterns.push(lamp);
     if (id === 'torre') this.territoryRadius += 1.5;
     if (id === 'cuartel') {
       if (!free) playSfx('sword');
@@ -660,13 +769,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   private addSmoke(x: number, y: number, depth: number) {
+    const wind = 10; // deriva constante hacia el este
     const puff = () => {
       if (!this.scene.isActive()) return;
-      const p = this.add.circle(x + Phaser.Math.Between(-5, 5), y, 5, 0xf5f0e8, 0.5).setDepth(depth);
-      this.tweens.add({
-        targets: p, y: y - 50, x: x + Phaser.Math.Between(8, 22), alpha: 0, scale: 2.2,
-        duration: 1900, onComplete: () => p.destroy(),
-      });
+      const dx = Phaser.Math.Between(-4, 4);
+      const halo = this.add.circle(x + dx, y, 6, 0x9aa0aa, 0.35).setDepth(depth);
+      const core = this.add.circle(x + dx, y - 2, 3.4, 0xf5f0e8, 0.6).setDepth(depth + 0.1);
+      for (const [p, rise, drift, grow] of [[halo, -34, wind + 8, 2.6], [core, -26, wind + 4, 2.0]] as const) {
+        this.tweens.add({
+          targets: p, y: y + rise, x: x + dx + drift, alpha: 0, scale: grow,
+          duration: 2100, onComplete: () => p.destroy(),
+        });
+      }
     };
     this.time.addEvent({ delay: 850, loop: true, callback: puff });
   }

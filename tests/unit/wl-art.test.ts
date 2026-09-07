@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { BUILDINGS } from '@/game/data/buildings';
-import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_RES_ICONS, WL_ROCKS, WL_TREES, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '@/game/data/wlArt';
+import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_RES_ICONS, WL_ROCKS, WL_TREES, WL_WHEAT, WL_WHEAT_ORDER, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '@/game/data/wlArt';
 
 const PUB = join(__dirname, '..', '..', 'public', 'assets');
 const PEOPLE_ROLES = Object.keys(WL_WORKERS);
@@ -96,6 +96,17 @@ describe('arte Widelands (GPL)', () => {
     expect(withBuild.length).toBeGreaterThan(10);
     for (const b of withBuild) {
       expect(existsSync(join(PUB, 'wl', 'sheets', b.build!.file))).toBe(true);
+    }
+  });
+
+  it('trigo con 5 etapas y orden de crecimiento', () => {
+    expect(WL_WHEAT_ORDER).toEqual(['tiny', 'small', 'medium', 'ripe']);
+    for (const stage of [...WL_WHEAT_ORDER, 'harvested']) {
+      const w = WL_WHEAT[stage];
+      expect(w, `falta trigo ${stage}`).toBeDefined();
+      expect(existsSync(join(PUB, 'wl', 'crops', w.file))).toBe(true);
+      expect(w.fw).toBeGreaterThan(0);
+      expect(w.hotspot[1]).toBeLessThanOrEqual(w.h);
     }
   });
 });
