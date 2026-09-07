@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "skills": {
+    "cameras": {
+      "source": "phaserjs/phaser",
+      "sourceType": "github",
+      "skillPath": "skills/cameras/SKILL.md",
+      "computedHash": "4226f37eb305a91e0d005b3006665232a4f2669fd79828f1b879624e9760d2e7"
+    },
+    "deploy-to-vercel": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/deploy-to-vercel/SKILL.md",
+      "computedHash": "03e0eaaa9bf13ba1e7ffa387f5893de6f324c0868c627001f179395a8feaa7c9"
+    },
+    "executing-plans": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/executing-plans/SKILL.md",
+      "computedHash": "78a07800ee99a5861ae10be59d79fad085fdca10444e8aaeb2691597e357cff8"
+    },
+    "game-setup-and-config": {
+      "source": "phaserjs/phaser",
+      "sourceType": "github",
+      "skillPath": "skills/game-setup-and-config/SKILL.md",
+      "computedHash": "ff373f46eef9528843a388b8fc2083b4a7aad8f50298d753ec745423706b77a0"
+    },
+    "input-keyboard-mouse-touch": {
+      "source": "phaserjs/phaser",
+      "sourceType": "github",
+      "skillPath": "skills/input-keyboard-mouse-touch/SKILL.md",
+      "computedHash": "ec25f47ee3cdc6a6ed0ceaa77d62fcbe30a161f73cbc2dcf3771e12c64bee791"
+    },
+    "scale-and-responsive": {
+      "source": "phaserjs/phaser",
+      "sourceType": "github",
+      "skillPath": "skills/scale-and-responsive/SKILL.md",
+      "computedHash": "a6d70e6e8191a7038f15ade6ac7dc9cb2c33bde8c64a3e82ae54cc84a640fa58"
+    },
+    "scenes": {
+      "source": "phaserjs/phaser",
+      "sourceType": "github",
+      "skillPath": "skills/scenes/SKILL.md",
+      "computedHash": "3074badaa83649550b218788638c4811bfa3dc9b21f1139e99661f36d1bcdc9e"
+    },
+    "sprites-and-images": {
+      "source": "phaserjs/phaser",
+      "sourceType": "github",
+      "skillPath": "skills/sprites-and-images/SKILL.md",
+      "computedHash": "0b481bd5b02c2e997a4207ba83046770a72db599b92c22353a9bbdbad77d1cfb"
+    },
+    "systematic-debugging": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/systematic-debugging/SKILL.md",
+      "computedHash": "a2750dfbaed1690da73b120254892c4f926b4576cb82eb16fc877783941fe39b"
+    },
+    "test-driven-development": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/test-driven-development/SKILL.md",
+      "computedHash": "a4126a9c5f17be3c228aa9e5755898ade283448b86099f56f40852e8c14532be"
+    },
+    "tilemaps": {
+      "source": "phaserjs/phaser",
+      "sourceType": "github",
+      "skillPath": "skills/tilemaps/SKILL.md",
+      "computedHash": "42007a40324eb14675db75b7cb9239c203c44caeefb97942ac3a6bae9fb92604"
+    },
+    "vercel-composition-patterns": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/composition-patterns/SKILL.md",
+      "computedHash": "575757e3e25761c8c562d6e395d29f0b76c98b1273c0bd72d88e6ab1bc9c7d42"
+    },
+    "vercel-react-best-practices": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/react-best-practices/SKILL.md",
+      "computedHash": "ca7b0c0c6e5f2750043f7f0cd72d16ac4e2abc48f9b5500d047a4b77a2506212"
+    },
+    "verification-before-completion": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/verification-before-completion/SKILL.md",
+      "computedHash": "b529822bdac4b197b180fe12225cff86b930b65910435103c10622df7f041651"
+    },
+    "web-design-guidelines": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/web-design-guidelines/SKILL.md",
+      "computedHash": "f3bc47f890f42a44db1007ab390709ec368e4b8c089baee6b0007182236ac474"
+    },
+    "writing-plans": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/writing-plans/SKILL.md",
+      "computedHash": "27c75044e444a4fc68798c3f799dc23eaff3a6bfabff32e6ad75bb20f881c094"
+    }
+  }
+}
