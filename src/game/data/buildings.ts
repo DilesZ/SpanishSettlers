@@ -41,7 +41,8 @@ export type BuildingId =
   | 'armeria'
   | 'cuartel'
   | 'torre'
-  | 'ornamento';
+  | 'ornamento'
+  | 'puerto';
 
 export interface BuildingDef {
   id: BuildingId;
@@ -50,7 +51,7 @@ export interface BuildingDef {
   tiempoConstruccionMs: number;
   herramienta?: string;
   descripcion: string;
-  categoria: 'base' | 'madera' | 'piedra' | 'comida' | 'mina' | 'industria' | 'militar' | 'decoracion';
+  categoria: 'base' | 'madera' | 'piedra' | 'comida' | 'mina' | 'industria' | 'militar' | 'decoracion' | 'mar';
 }
 
 export const BUILDINGS: Record<BuildingId, BuildingDef> = {
@@ -75,6 +76,7 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   cuartel: { id: 'cuartel', nombre: 'Cuartel', coste: { tablon: 4, piedra: 3 }, tiempoConstruccionMs: 10000, descripcion: 'Recluta espadachines y arqueros N1-N3.', categoria: 'militar' },
   torre: { id: 'torre', nombre: 'Torre vigía', coste: { tablon: 2, piedra: 3 }, tiempoConstruccionMs: 8000, descripcion: 'Expande territorio. Guarnécela con 1 soldado.', categoria: 'militar' },
   ornamento: { id: 'ornamento', nombre: 'Ornamento', coste: { madera: 1, piedra: 1 }, tiempoConstruccionMs: 3000, descripcion: 'Embellece y da +fuerza militar (doble de su coste).', categoria: 'decoracion' },
+  puerto: { id: 'puerto', nombre: 'Puerto', coste: { madera: 4, tablon: 4, piedra: 2 }, tiempoConstruccionMs: 12000, descripcion: 'Junto al agua: bota barcos que traen pescado de altura.', categoria: 'mar' },
 };
 
 export interface Recipe {

@@ -35,6 +35,7 @@ const BUILD_MAP = {
   cuartel: 'buildings/productionsites/barbarians/barracks',
   torre: 'buildings/militarysites/barbarians/tower',
   ornamento: 'buildings/productionsites/barbarians/lime_kiln',
+  puerto: 'buildings/productionsites/barbarians/shipyard',
 };
 
 const WORKER_MAP = {
@@ -235,7 +236,37 @@ for (const n of ['bunny', 'deer', 'sheep', 'duck']) {
   critters[n] = entry;
 }
 
-// --- Trigo por etapas (tiny/small/medium/ripe/harvested) para granjas vivas ---
+// --- Barcos bárbaros (velas en 6 direcciones + idle) ---
+const ships = {};
+mkdirSync(join(OUT, 'ships'), { recursive: true });
+{
+  const src = join(WL, 'ships/barbarians');
+  const lua = join(src, 'init.lua');
+  if (existsSync(lua)) {
+    const text = readFileSync(lua, 'utf8');
+    const entry = { dirs: {} };
+    for (const d of ['e', 'se', 'sw', 'w', 'nw', 'ne']) {
+      const cand = join(src, `sail_${d}_1.png`);
+      if (!existsSync(cand)) { fail.push(`barco: sin sail_${d}`); continue; }
+      const meta = await sharp(cand).metadata();
+      // tira vertical de frames: rejilla del init (sail: frames/columns/rows)
+      const blk = blockOf(text, 'sail');
+      const cols = blk ? getNum(blk, 'columns') ?? 1 : 1;
+      const rows = blk ? getNum(blk, 'rows') ?? 1 : 1;
+      copyFileSync(cand, join(OUT, 'ships', `ship-${d}.png`));
+      entry.dirs[d] = { file: `ship-${d}.png`, w: meta.width, h: meta.height, fw: Math.round(meta.width / cols), fh: Math.round(meta.height / rows), frames: blk ? getNum(blk, 'frames') ?? 1 : 1, fps: blk ? getNum(blk, 'fps') ?? 6 : 6 };
+    }
+    const idle = join(src, 'idle_1.png');
+    if (existsSync(idle)) {
+      const meta = await sharp(idle).metadata();
+      copyFileSync(idle, join(OUT, 'ships', 'ship-idle.png'));
+      entry.idle = { file: 'ship-idle.png', w: meta.width, h: meta.height };
+    }
+    ships.barbarian = entry;
+  } else {
+    fail.push('barco: sin init.lua');
+  }
+}
 const wheat = {};
 mkdirSync(join(OUT, 'crops'), { recursive: true });
 for (const stage of ['tiny', 'small', 'medium', 'ripe', 'harvested']) {
@@ -290,7 +321,7 @@ for (const [id, dir] of Object.entries(BUILD_MAP)) {
   };
 }
 
-writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ buildings, workers, nature, critters, resIcons, wheat }, null, 2));
+writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ buildings, workers, nature, critters, resIcons, wheat, ships }, null, 2));
 const ts =
   `// Generado por scripts/import-widelands.mjs — NO EDITAR A MANO.\n` +
   `// Arte GPL-2.0+ de Widelands (ver docs/ATRIBUCION.md).\n` +
@@ -308,6 +339,9 @@ const ts =
   `export interface WlCritterDir { file: string; w: number; h: number; fw: number; fh: number }\n` +
   `export interface WlCritter { grid: { fps: number; frames: number; columns: number; rows: number }; dirs: Record<string, WlCritterDir> }\n` +
   `export const WL_CRITTERS: Record<string, WlCritter> = ${JSON.stringify(critters)};\n` +
+  `export interface WlShipDir { file: string; w: number; h: number; fw: number; fh: number; frames: number; fps: number }\n` +
+  `export interface WlShip { dirs: Partial<Record<string, WlShipDir>>; idle?: { file: string; w: number; h: number } }\n` +
+  `export const WL_SHIPS: Record<string, WlShip> = ${JSON.stringify(ships)};\n` +
   `export interface WlWheatStage { file: string; w: number; h: number; fw: number; fh: number; fps: number; frames: number; columns: number; rows: number; hotspot: [number, number] }\n` +
   `export const WL_WHEAT: Record<string, WlWheatStage> = ${JSON.stringify(wheat)};\n` +
   `export const WL_WHEAT_ORDER = ['tiny', 'small', 'medium', 'ripe'];\n` +

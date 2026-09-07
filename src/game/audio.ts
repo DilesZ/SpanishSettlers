@@ -3,9 +3,12 @@ const FILES: Record<string, string> = {
   click: '/assets/audio/click.ogg',
   select: '/assets/audio/select.ogg',
   confirm: '/assets/audio/confirm.ogg',
+  built: '/assets/audio/built.ogg',
   error: '/assets/audio/error.ogg',
   chop: '/assets/audio/chop.ogg',
   sword: '/assets/audio/sword.ogg',
+  pluck: '/assets/audio/pluck.ogg',
+  splash: '/assets/audio/splash.ogg',
 };
 
 const cache = new Map<string, HTMLAudioElement>();

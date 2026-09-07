@@ -396,6 +396,26 @@
         53
       ],
       "src": "buildings/productionsites/barbarians/lime_kiln"
+    },
+    "puerto": {
+      "w": 118,
+      "h": 70,
+      "hotspot": [
+        62,
+        48
+      ],
+      "src": "buildings/productionsites/barbarians/shipyard",
+      "build": {
+        "file": "puerto-build.png",
+        "fw": 117,
+        "fh": 69,
+        "frames": 4,
+        "fps": 6,
+        "hotspot": [
+          62,
+          48
+        ]
+      }
     }
   },
   "workers": {
@@ -1464,6 +1484,71 @@
         36,
         27
       ]
+    }
+  },
+  "ships": {
+    "barbarian": {
+      "dirs": {
+        "e": {
+          "file": "ship-e.png",
+          "w": 872,
+          "h": 740,
+          "fw": 218,
+          "fh": 148,
+          "frames": 20,
+          "fps": 10
+        },
+        "se": {
+          "file": "ship-se.png",
+          "w": 872,
+          "h": 740,
+          "fw": 218,
+          "fh": 148,
+          "frames": 20,
+          "fps": 10
+        },
+        "sw": {
+          "file": "ship-sw.png",
+          "w": 872,
+          "h": 740,
+          "fw": 218,
+          "fh": 148,
+          "frames": 20,
+          "fps": 10
+        },
+        "w": {
+          "file": "ship-w.png",
+          "w": 872,
+          "h": 740,
+          "fw": 218,
+          "fh": 148,
+          "frames": 20,
+          "fps": 10
+        },
+        "nw": {
+          "file": "ship-nw.png",
+          "w": 872,
+          "h": 740,
+          "fw": 218,
+          "fh": 148,
+          "frames": 20,
+          "fps": 10
+        },
+        "ne": {
+          "file": "ship-ne.png",
+          "w": 872,
+          "h": 740,
+          "fw": 218,
+          "fh": 148,
+          "frames": 20,
+          "fps": 10
+        }
+      },
+      "idle": {
+        "file": "ship-idle.png",
+        "w": 936,
+        "h": 833
+      }
     }
   }
 }

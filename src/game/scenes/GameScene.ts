@@ -1,9 +1,10 @@
 import Phaser from 'phaser';
 import { playSfx } from '../audio';
-import { BUILDINGS, INITIAL_STOCK, type BuildingId, type ResourceId } from '../data/buildings';
-import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_ROCKS, WL_TREES, WL_WHEAT, WL_WHEAT_ORDER, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
+import { BUILDINGS, INITIAL_STOCK, RECIPES, type BuildingId, type ResourceId } from '../data/buildings';
+import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_RES_ICONS, WL_ROCKS, WL_SHIPS, WL_TREES, WL_WHEAT, WL_WHEAT_ORDER, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
 import { DAY_LENGTH_MS, skyAt } from '../systems/daynight';
 import { findPath, smoothPath, type GridPos } from '../systems/pathfinding';
+import { goodsFor, isNavigable, pickFishingCircuit, touchesWater } from '../systems/ships';
 import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
 import { tickJob, type ProductionJob, type Stock } from '../systems/economy';
 
@@ -16,6 +17,7 @@ const WL_TEX: Record<BuildingId, string> = {
   minaCarbon: 'wl-b-minaCarbon', minaHierro: 'wl-b-minaHierro', minaOro: 'wl-b-minaOro',
   fundicion: 'wl-b-fundicion', herreria: 'wl-b-herreria', armeria: 'wl-b-armeria',
   cuartel: 'wl-b-cuartel', torre: 'wl-b-torre', ornamento: 'wl-b-ornamento',
+  puerto: 'wl-b-puerto',
 };
 
 const WL_SMOKE: Set<BuildingId> = new Set(['fundicion', 'herreria', 'panaderia', 'minaCarbon', 'minaHierro', 'minaOro', 'cabanaLenador']);
@@ -37,12 +39,31 @@ interface Walker {
   stateT: number;
   onArrive: (() => void) | null;
   loaded: boolean;
+  goods: ResourceId | null;
+  goodsIcon: Phaser.GameObjects.Image | null;
 }
+
+interface Ship {
+  sprite: Phaser.GameObjects.Sprite;
+  path: GridPos[];
+  targetPx: { x: number; y: number } | null;
+  circuit: GridPos[];
+  leg: number;
+  home: GridPos;
+  wakeT: number;
+}
+
+/** Receta principal por edificio productor (para el panel info y la sim). */
+const RECIPE_BY_BUILDING: Partial<Record<BuildingId, string>> = {
+  aserradero: 'tablon', molino: 'harina', panaderia: 'pan',
+  fundicion: 'lingote-hierro', herreria: 'herramienta', armeria: 'espada',
+};
 
 export class GameScene extends Phaser.Scene {
   stock: Stock = { ...INITIAL_STOCK };
   placed: Placed[] = [];
   walkers: Walker[] = [];
+  ships: Ship[] = [];
   buildingTiles = new Set<string>();
   pendingBuild: BuildingId | null = null;
   territoryRadius = 7;
@@ -137,11 +158,27 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
+    for (const [dir, d] of Object.entries(WL_SHIPS.barbarian?.dirs ?? {})) {
+      if (!d) continue;
+      this.load.spritesheet(`wl-ship-${dir}`, `/assets/wl/ships/${d.file}`, {
+        frameWidth: d.fw, frameHeight: d.fh,
+      });
+    }
+    for (const f of Object.values(WL_RES_ICONS)) {
+      this.load.image(`wl-icon-${f.replace('.png', '')}`, `/assets/wl/icons/${f}`);
+    }
     for (const [stage, w] of Object.entries(WL_WHEAT)) {
       this.load.spritesheet(`wl-wheat-${stage}`, `/assets/wl/crops/${w.file}`, {
         frameWidth: w.fw, frameHeight: w.fh,
       });
     }
+  }
+
+  /** Frames utilizables: mínimo entre declarados y celdas físicas del sheet. */
+  private capFrames(declared: number, w: number, h: number, fw: number, fh: number): number {
+    if (!fw || !fh) return Math.max(1, declared);
+    const cells = Math.floor(w / fw) * Math.floor(h / fh);
+    return Math.max(1, Math.min(declared, cells));
   }
 
   private createWlAnims() {
@@ -154,34 +191,33 @@ export class GameScene extends Phaser.Scene {
         frameRate: art.sheet.fps,
         repeat: -1,
       });
-      if (art.build && !this.anims.exists(`wl-build-${id}`)) {
-        this.anims.create({
-          key: `wl-build-${id}`,
-          frames: this.anims.generateFrameNumbers(`wl-buildsheet-${id}`, { start: 0, end: art.build.frames - 1 }),
-          frameRate: art.build.fps,
-          repeat: -1,
-        });
-      }
+    }
+    for (const [id, art] of Object.entries(WL_BUILDINGS)) {
+      if (!art.build || this.anims.exists(`wl-build-${id}`)) continue;
+      this.anims.create({
+        key: `wl-build-${id}`,
+        frames: this.anims.generateFrameNumbers(`wl-buildsheet-${id}`, { start: 0, end: art.build.frames - 1 }),
+        frameRate: art.build.fps,
+        repeat: -1,
+      });
     }
     for (const [role, w] of Object.entries(WL_WORKERS)) {
-      for (const dir of Object.keys(w.dirs)) {
+      for (const [dir, d] of Object.entries(w.dirs)) {
         const key = `wl-walk-${role}-${dir}`;
-        if (this.anims.exists(key)) continue;
-        const total = w.grid.columns * w.grid.rows;
+        if (!d || this.anims.exists(key)) continue;
         this.anims.create({
           key,
-          frames: this.anims.generateFrameNumbers(`wl-${role}-${dir}`, { start: 0, end: Math.min(w.grid.frames, total) - 1 }),
+          frames: this.anims.generateFrameNumbers(`wl-${role}-${dir}`, { start: 0, end: this.capFrames(w.grid.frames, d.w, d.h, d.fw, d.fh) - 1 }),
           frameRate: w.grid.fps,
           repeat: -1,
         });
       }
-      for (const dir of Object.keys(w.loads ?? {})) {
+      for (const [dir, d] of Object.entries(w.loads ?? {})) {
         const key = `wl-walkload-${role}-${dir}`;
-        if (this.anims.exists(key)) continue;
-        const total = w.grid.columns * w.grid.rows;
+        if (!d || this.anims.exists(key)) continue;
         this.anims.create({
           key,
-          frames: this.anims.generateFrameNumbers(`wl-${role}-load-${dir}`, { start: 0, end: Math.min(w.grid.frames, total) - 1 }),
+          frames: this.anims.generateFrameNumbers(`wl-${role}-load-${dir}`, { start: 0, end: this.capFrames(w.grid.frames, d.w, d.h, d.fw, d.fh) - 1 }),
           frameRate: w.grid.fps,
           repeat: -1,
         });
@@ -189,7 +225,7 @@ export class GameScene extends Phaser.Scene {
       if (w.idle && !this.anims.exists(`wl-idle-${role}`)) {
         this.anims.create({
           key: `wl-idle-${role}`,
-          frames: this.anims.generateFrameNumbers(`wl-${role}-idle`, { start: 0, end: w.idle.frames - 1 }),
+          frames: this.anims.generateFrameNumbers(`wl-${role}-idle`, { start: 0, end: this.capFrames(w.idle.frames, w.idle.w, w.idle.h, w.idle.fw, w.idle.fh) - 1 }),
           frameRate: Math.min(w.idle.fps, 6),
           repeat: -1,
         });
@@ -197,7 +233,7 @@ export class GameScene extends Phaser.Scene {
       if (w.hack && !this.anims.exists(`wl-hack-${role}`)) {
         this.anims.create({
           key: `wl-hack-${role}`,
-          frames: this.anims.generateFrameNumbers(`wl-${role}-hack`, { start: 0, end: w.hack.frames - 1 }),
+          frames: this.anims.generateFrameNumbers(`wl-${role}-hack`, { start: 0, end: this.capFrames(w.hack.frames, w.hack.w, w.hack.h, w.hack.fw, w.hack.fh) - 1 }),
           frameRate: Math.min(w.hack.fps, 10),
           repeat: -1,
         });
@@ -213,15 +249,29 @@ export class GameScene extends Phaser.Scene {
       });
     }
     for (const [name, c] of Object.entries(WL_CRITTERS)) {
-      for (const dir of Object.keys(c.dirs)) {
-        if (dir === 'idle') continue;
+      for (const [dir, d] of Object.entries(c.dirs)) {
+        if (dir === 'idle' || !d) continue;
         const key = `wl-crit-${name}-${dir}`;
         if (this.anims.exists(key)) continue;
-        const total = c.grid.columns * c.grid.rows;
         this.anims.create({
           key,
-          frames: this.anims.generateFrameNumbers(`wl-crit-${name}-${dir}`, { start: 0, end: Math.min(c.grid.frames, total) - 1 }),
+          frames: this.anims.generateFrameNumbers(`wl-crit-${name}-${dir}`, { start: 0, end: this.capFrames(c.grid.frames, d.w, d.h, d.fw, d.fh) - 1 }),
           frameRate: Math.min(c.grid.fps, 12),
+          repeat: -1,
+        });
+      }
+    }
+    const ship = WL_SHIPS.barbarian;
+    if (ship) {
+      for (const dir of Object.keys(ship.dirs)) {
+        const key = `wl-ship-${dir}`;
+        if (this.anims.exists(key)) continue;
+        const d = ship.dirs[dir as keyof typeof ship.dirs];
+        if (!d) continue;
+        this.anims.create({
+          key,
+          frames: this.anims.generateFrameNumbers(`wl-ship-${dir}`, { start: 0, end: Math.min(19, Math.floor((d.w / d.fw) * (d.h / d.fh)) - 1) }),
+          frameRate: 8,
           repeat: -1,
         });
       }
@@ -256,6 +306,38 @@ export class GameScene extends Phaser.Scene {
     this.time.addEvent({ delay: 6000, loop: true, callback: () => this.wheatTick() });
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.skyTick() });
     this.scale.on('resize', () => this.layoutMinimap());
+    // demo para fotos/tests: ?demo=puerto coloca un puerto junto al agua
+    try {
+      if (new URLSearchParams(window.location.search).get('demo') === 'puerto') {
+        this.time.delayedCall(2500, () => this.demoPort());
+      }
+    } catch { /* noop */ }
+  }
+
+  private demoPort() {
+    const at = (ax: number, ay: number) => (ax < 0 || ay < 0 || ax >= MAP || ay >= MAP ? null : terrainAt(ax, ay));
+    let best: GridPos | null = null;
+    let bestD = Infinity;
+    for (let ty = 2; ty < MAP - 2; ty++) {
+      for (let tx = 2; tx < MAP - 2; tx++) {
+        const t = terrainAt(tx, ty);
+        if (t === 'water' || t === 'waterB' || t === 'waterC') continue;
+        if (this.buildingTiles.has(`${tx},${ty}`)) continue;
+        if (!touchesWater(tx, ty, at)) continue;
+        const d = Math.hypot(tx - this.center.x, ty - this.center.y);
+        if (d < bestD) { bestD = d; best = { x: tx, y: ty }; }
+      }
+    }
+    if (best) {
+      // stock de sobra para la demo y cámara al puerto
+      this.stock.madera += 20;
+      this.stock.tablon += 20;
+      this.stock.piedra += 20;
+      if (this.tryPlace('puerto', best.x, best.y, false)) {
+        const p = this.iso(best.x, best.y);
+        this.cameras.main.centerOn(p.x, p.y);
+      }
+    }
   }
 
   iso(tx: number, ty: number) {
@@ -545,6 +627,7 @@ export class GameScene extends Phaser.Scene {
     if (harvested > 0) {
       this.stock.grano += harvested;
       this.updateHud();
+      playSfx('pluck');
     }
   }
 
@@ -631,7 +714,7 @@ export class GameScene extends Phaser.Scene {
     const w: Walker = {
       sprite, shadow, role, kind, path: [], targetPx: null,
       speed: kind === 'critter' ? 55 : 68, state: 'idle', stateT: Math.random() * 1.5,
-      onArrive: null, loaded: false,
+      onArrive: null, loaded: false, goods: null, goodsIcon: null,
     };
     this.walkers.push(w);
     return w;
@@ -766,6 +849,120 @@ export class GameScene extends Phaser.Scene {
       w.shadow.setPosition(s.x, s.y + 13);
       s.setDepth(7500 + Math.round(s.y / 4));
       w.shadow.setDepth(7499 + Math.round(s.y / 4));
+      if (w.goodsIcon) {
+        w.goodsIcon.setPosition(s.x + 10, s.y - 30);
+        w.goodsIcon.setDepth(7501 + Math.round(s.y / 4));
+      }
+    }
+  }
+
+  // ============ Barcos: circuitos de pesca desde el puerto ============
+  private waterBlocked(tx: number, ty: number, gx: number, gy: number): boolean {
+    if (tx < 1 || ty < 1 || tx >= MAP - 1 || ty >= MAP - 1) return true;
+    if (tx === gx && ty === gy) return false;
+    return !isNavigable(terrainAt(tx, ty));
+  }
+
+  private spawnShip(portTx: number, portTy: number) {
+    const mine = this.ships.filter((s) => s.home.x === portTx && s.home.y === portTy).length;
+    if (mine >= 2) return;
+    // agua adyacente al puerto para botar
+    const deltas = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]];
+    let start: GridPos | null = null;
+    for (const [dx, dy] of deltas) {
+      const t = terrainAt(portTx + dx, portTy + dy);
+      if (isNavigable(t)) { start = { x: portTx + dx, y: portTy + dy }; break; }
+    }
+    if (!start) return;
+    const { x, y } = this.iso(start.x, start.y);
+    const sprite = this.add.sprite(x, y, 'wl-ship-e', 0).setDepth(4500).setScale(0.9);
+    sprite.play('wl-ship-e');
+    const ship: Ship = {
+      sprite, path: [], targetPx: null, circuit: [], leg: 0,
+      home: { x: portTx, y: portTy }, wakeT: 0,
+    };
+    this.ships.push(ship);
+    playSfx('splash');
+    this.sendShip(ship);
+  }
+
+  private sendShip(ship: Ship) {
+    ship.circuit = pickFishingCircuit(
+      ship.home,
+      (x, y) => isNavigable(terrainAt(x, y)),
+      MAP, MAP, 9, 4,
+    );
+    ship.circuit.push({ ...ship.home });
+    ship.leg = 0;
+    this.sailTo(ship, ship.circuit[0]);
+  }
+
+  private sailTo(ship: Ship, dest: GridPos) {
+    const from = this.groundLayer.worldToTileXY(ship.sprite.x, ship.sprite.y) ?? ship.home;
+    const fx = Phaser.Math.Clamp(from.x, 0, MAP - 1);
+    const fy = Phaser.Math.Clamp(from.y, 0, MAP - 1);
+    const raw = findPath({ x: fx, y: fy }, dest, MAP, MAP, (x, y) => this.waterBlocked(x, y, dest.x, dest.y));
+    if (!raw || raw.length < 2) {
+      ship.path = [];
+      ship.targetPx = null;
+      return;
+    }
+    ship.path = smoothPath(raw, (x, y) => this.waterBlocked(x, y, dest.x, dest.y)).slice(1);
+    const next = ship.path.shift()!;
+    const p = this.iso(next.x, next.y);
+    ship.targetPx = { x: p.x, y: p.y - 6 };
+  }
+
+  private updateShips(dt: number) {
+    for (const ship of this.ships) {
+      const s = ship.sprite;
+      if (!s.active) continue;
+      if (!ship.targetPx) {
+        // fin de tramo: pescar o volver
+        if (ship.leg < ship.circuit.length - 1) {
+          ship.leg++;
+          this.sailTo(ship, ship.circuit[ship.leg]);
+        } else {
+          // travesía completa: pescado al almacén
+          this.stock.pez += 2;
+          this.updateHud();
+          playSfx('splash');
+          this.sendShip(ship);
+        }
+        continue;
+      }
+      const dx = ship.targetPx.x - s.x;
+      const dy = ship.targetPx.y - s.y;
+      const dist = Math.hypot(dx, dy);
+      const step = 95 * dt;
+      if (dist <= Math.max(5, step)) {
+        s.x = ship.targetPx.x;
+        s.y = ship.targetPx.y;
+        const next = ship.path.shift();
+        if (!next) {
+          ship.targetPx = null;
+        } else {
+          const p = this.iso(next.x, next.y);
+          ship.targetPx = { x: p.x, y: p.y - 6 };
+        }
+      } else {
+        s.x += (dx / dist) * step;
+        s.y += (dy / dist) * step;
+        const dir = this.dir6(dx, dy);
+        const key = `wl-ship-${dir}`;
+        if (this.anims.exists(key) && s.anims.currentAnim?.key !== key) {
+          s.setTexture(`wl-ship-${dir}`);
+          s.play(key, true);
+        }
+      }
+      // estela
+      ship.wakeT -= dt;
+      if (ship.wakeT <= 0) {
+        ship.wakeT = 0.35;
+        const foam = this.add.circle(s.x - 10, s.y + 8, 4, 0xffffff, 0.4).setDepth(4499);
+        this.tweens.add({ targets: foam, alpha: 0, scale: 2.4, duration: 1200, onComplete: () => foam.destroy() });
+      }
+      s.setDepth(4500);
     }
   }
 
@@ -826,9 +1023,15 @@ export class GameScene extends Phaser.Scene {
         if (this.placed.length < 2 || !almacen) { this.stroll(w); break; }
         const b = this.placed[Phaser.Math.Between(1, this.placed.length - 1)];
         w.loaded = false;
+        this.setGoods(w, null);
         if (!this.sendWalker(w, b.tx, b.ty, () => {
-          w.loaded = true; // carga y vuelve al almacén
-          this.sendWalker(w, almacen.tx, almacen.ty, () => { w.loaded = false; this.assignJob(w); });
+          w.loaded = true; // carga mercancía del edificio y vuelve al almacén
+          this.setGoods(w, goodsFor(b.id));
+          this.sendWalker(w, almacen.tx, almacen.ty, () => {
+            w.loaded = false;
+            this.setGoods(w, null);
+            this.assignJob(w);
+          });
         })) this.stroll(w);
         break;
       }
@@ -844,6 +1047,19 @@ export class GameScene extends Phaser.Scene {
       }
       default:
         this.stroll(w);
+    }
+  }
+
+  /** Icono de mercancía sobre el portador cargado. */
+  private setGoods(w: Walker, goods: ResourceId | null) {
+    w.goods = goods;
+    if (w.goodsIcon) {
+      w.goodsIcon.destroy();
+      w.goodsIcon = null;
+    }
+    if (goods) {
+      w.goodsIcon = this.add.image(w.sprite.x + 10, w.sprite.y - 30, `wl-icon-res-${goods}`)
+        .setScale(0.62).setDepth(8000);
     }
   }
 
@@ -888,7 +1104,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   onTileClicked(tx: number, ty: number) {
-    if (!this.pendingBuild) return;
+    const ww = window as unknown as { __inspect?: object | null };
+    if (!this.pendingBuild) {
+      // selección: publica la ficha para el panel React
+      const game = (window as unknown as { __game?: { inspect: (x: number, y: number) => object | null } }).__game;
+      ww.__inspect = game?.inspect(tx, ty) ?? null;
+      if (ww.__inspect) playSfx('select');
+      return;
+    }
     const t = terrainAt(tx, ty);
     if (t === 'water' || t === 'waterB' || t === 'waterC') {
       this.hintText.setText('⛔ No se puede construir en el agua').setY(44);
@@ -917,6 +1140,15 @@ export class GameScene extends Phaser.Scene {
     }
     const scale = wlBuildingScale(art.w, art.h);
     const { x, y } = this.iso(tx, ty);
+    if (id === 'puerto' || id === 'pesqueria') {
+      const at = (ax: number, ay: number) => (ax < 0 || ay < 0 || ax >= MAP || ay >= MAP ? null : terrainAt(ax, ay));
+      if (!touchesWater(tx, ty, at)) {
+        this.hintText.setText(`⛔ ${def.nombre} necesita agua adyacente`).setY(44);
+        playSfx('error');
+        this.time.delayedCall(1500, () => this.hintText.setText(''));
+        return false;
+      }
+    }
     const depth = 6000 + ty * 4;
     const parts: Phaser.GameObjects.GameObject[] = [];
     parts.push(this.add.image(0, -2, 'shadow').setAlpha(0.75).setScale(3.0));
@@ -959,7 +1191,11 @@ export class GameScene extends Phaser.Scene {
     this.drawPath(x, y, depth - 1);
     this.tweens.add({
       targets: buildFx ? [buildFx] : [], alpha: 0, duration: Math.min(def.tiempoConstruccionMs, 4000),
-      onComplete: () => { buildFx?.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, scale); },
+      onComplete: () => {
+        buildFx?.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, scale);
+        playSfx('built');
+        if (id === 'puerto') this.spawnShip(tx, ty);
+      },
     });
     this.placed.push({ id, tx, ty, sprite: c, done: 0, total: def.tiempoConstruccionMs });
     this.buildingTiles.add(`${tx},${ty}`);
@@ -1097,9 +1333,7 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
-    const recipeByBuilding: Partial<Record<BuildingId, string>> = {
-      aserradero: 'tablon', molino: 'harina', panaderia: 'pan', fundicion: 'lingote-hierro', herreria: 'herramienta', armeria: 'espada',
-    };
+    const recipeByBuilding: Partial<Record<BuildingId, string>> = RECIPE_BY_BUILDING;
     for (const p of this.placed) {
       const rid = recipeByBuilding[p.id];
       if (!rid) continue;
@@ -1120,7 +1354,16 @@ export class GameScene extends Phaser.Scene {
 
   private exposeBridge() {
     const w = window as unknown as {
-      __game?: { place: (id: BuildingId) => void; stock: () => Stock; counts: () => number };
+      __game?: {
+        place: (id: BuildingId) => void;
+        stock: () => Stock;
+        counts: () => number;
+        inspect: (tx: number, ty: number) => {
+          id: BuildingId; nombre: string; descripcion: string; categoria: string;
+          receta?: { in: [string, number][]; out: [string, number][] };
+          produciendo: boolean;
+        } | null;
+      };
     };
     w.__game = {
       place: (id: BuildingId) => {
@@ -1129,6 +1372,24 @@ export class GameScene extends Phaser.Scene {
       },
       stock: () => ({ ...this.stock }),
       counts: () => this.placed.length,
+      inspect: (tx: number, ty: number) => {
+        const p = this.placed.find((q) => q.tx === tx && q.ty === ty);
+        if (!p) return null;
+        const def = BUILDINGS[p.id];
+        const rid = RECIPE_BY_BUILDING[p.id];
+        const recipe = rid ? RECIPES.find((r) => r.id === rid) : undefined;
+        return {
+          id: p.id,
+          nombre: def.nombre,
+          descripcion: def.descripcion,
+          categoria: def.categoria,
+          receta: recipe ? {
+            in: Object.entries(recipe.entradas) as [string, number][],
+            out: Object.entries(recipe.salidas) as [string, number][],
+          } : undefined,
+          produciendo: !!recipe,
+        };
+      },
     };
   }
 
@@ -1140,6 +1401,8 @@ export class GameScene extends Phaser.Scene {
     if (keys?.right.isDown || this.wasd?.D.isDown) cam.scrollX += speed;
     if (keys?.up.isDown || this.wasd?.W.isDown) cam.scrollY -= speed;
     if (keys?.down.isDown || this.wasd?.S.isDown) cam.scrollY += speed;
-    this.updateWalkers(Math.min(delta, 100));
+    const dt = Math.min(delta, 100) / 1000;
+    this.updateWalkers(dt * 1000);
+    this.updateShips(dt);
   }
 }
