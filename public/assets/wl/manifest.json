@@ -415,15 +415,52 @@
           "fw": 36,
           "fh": 52
         },
+        "se": {
+          "file": "settler-se.png",
+          "w": 108,
+          "h": 208,
+          "fw": 36,
+          "fh": 52
+        },
+        "sw": {
+          "file": "settler-sw.png",
+          "w": 108,
+          "h": 208,
+          "fw": 36,
+          "fh": 52
+        },
         "w": {
           "file": "settler-w.png",
           "w": 108,
           "h": 208,
           "fw": 36,
           "fh": 52
+        },
+        "nw": {
+          "file": "settler-nw.png",
+          "w": 108,
+          "h": 208,
+          "fw": 36,
+          "fh": 52
+        },
+        "ne": {
+          "file": "settler-ne.png",
+          "w": 108,
+          "h": 208,
+          "fw": 36,
+          "fh": 52
         }
       },
-      "loads": {}
+      "loads": {},
+      "idle": {
+        "file": "settler-idle.png",
+        "w": 552,
+        "h": 611,
+        "fw": 46,
+        "fh": 47,
+        "frames": 150,
+        "fps": 10
+      }
     },
     "woodcutter": {
       "worker": "lumberjack",
@@ -441,15 +478,104 @@
           "fw": 36,
           "fh": 45
         },
+        "se": {
+          "file": "woodcutter-se.png",
+          "w": 108,
+          "h": 180,
+          "fw": 36,
+          "fh": 45
+        },
+        "sw": {
+          "file": "woodcutter-sw.png",
+          "w": 108,
+          "h": 180,
+          "fw": 36,
+          "fh": 45
+        },
         "w": {
           "file": "woodcutter-w.png",
           "w": 108,
           "h": 180,
           "fw": 36,
           "fh": 45
+        },
+        "nw": {
+          "file": "woodcutter-nw.png",
+          "w": 108,
+          "h": 180,
+          "fw": 36,
+          "fh": 45
+        },
+        "ne": {
+          "file": "woodcutter-ne.png",
+          "w": 108,
+          "h": 180,
+          "fw": 36,
+          "fh": 45
         }
       },
-      "loads": {}
+      "loads": {
+        "e": {
+          "file": "woodcutter-load-e.png",
+          "w": 114,
+          "h": 184,
+          "fw": 38,
+          "fh": 46
+        },
+        "se": {
+          "file": "woodcutter-load-se.png",
+          "w": 114,
+          "h": 184,
+          "fw": 38,
+          "fh": 46
+        },
+        "sw": {
+          "file": "woodcutter-load-sw.png",
+          "w": 114,
+          "h": 184,
+          "fw": 38,
+          "fh": 46
+        },
+        "w": {
+          "file": "woodcutter-load-w.png",
+          "w": 114,
+          "h": 184,
+          "fw": 38,
+          "fh": 46
+        },
+        "nw": {
+          "file": "woodcutter-load-nw.png",
+          "w": 114,
+          "h": 184,
+          "fw": 38,
+          "fh": 46
+        },
+        "ne": {
+          "file": "woodcutter-load-ne.png",
+          "w": 114,
+          "h": 184,
+          "fw": 38,
+          "fh": 46
+        }
+      },
+      "idle": {
+        "file": "woodcutter-idle.png",
+        "w": 87,
+        "h": 168,
+        "fw": 29,
+        "fh": 42,
+        "frames": 10,
+        "fps": 10
+      },
+      "hack": {
+        "file": "woodcutter-hack.png",
+        "w": 135,
+        "h": 152,
+        "fw": 45,
+        "fh": 38,
+        "frames": 10,
+        "fps": 10
+      }
     },
     "carrier": {
       "worker": "carrier",
@@ -467,8 +593,36 @@
           "fw": 25,
           "fh": 42
         },
+        "se": {
+          "file": "carrier-se.png",
+          "w": 75,
+          "h": 168,
+          "fw": 25,
+          "fh": 42
+        },
+        "sw": {
+          "file": "carrier-sw.png",
+          "w": 75,
+          "h": 168,
+          "fw": 25,
+          "fh": 42
+        },
         "w": {
           "file": "carrier-w.png",
+          "w": 75,
+          "h": 168,
+          "fw": 25,
+          "fh": 42
+        },
+        "nw": {
+          "file": "carrier-nw.png",
+          "w": 75,
+          "h": 168,
+          "fw": 25,
+          "fh": 42
+        },
+        "ne": {
+          "file": "carrier-ne.png",
           "w": 75,
           "h": 168,
           "fw": 25,
@@ -483,13 +637,50 @@
           "fw": 27,
           "fh": 44
         },
+        "se": {
+          "file": "carrier-load-se.png",
+          "w": 81,
+          "h": 176,
+          "fw": 27,
+          "fh": 44
+        },
+        "sw": {
+          "file": "carrier-load-sw.png",
+          "w": 81,
+          "h": 176,
+          "fw": 27,
+          "fh": 44
+        },
         "w": {
           "file": "carrier-load-w.png",
           "w": 81,
           "h": 176,
           "fw": 27,
           "fh": 44
+        },
+        "nw": {
+          "file": "carrier-load-nw.png",
+          "w": 81,
+          "h": 176,
+          "fw": 27,
+          "fh": 44
+        },
+        "ne": {
+          "file": "carrier-load-ne.png",
+          "w": 81,
+          "h": 176,
+          "fw": 27,
+          "fh": 44
         }
+      },
+      "idle": {
+        "file": "carrier-idle.png",
+        "w": 360,
+        "h": 440,
+        "fw": 36,
+        "fh": 44,
+        "frames": 100,
+        "fps": 5
       }
     },
     "soldier": {
@@ -508,15 +699,52 @@
           "fw": 33,
           "fh": 35
         },
+        "se": {
+          "file": "soldier-se.png",
+          "w": 99,
+          "h": 140,
+          "fw": 33,
+          "fh": 35
+        },
+        "sw": {
+          "file": "soldier-sw.png",
+          "w": 99,
+          "h": 140,
+          "fw": 33,
+          "fh": 35
+        },
         "w": {
           "file": "soldier-w.png",
           "w": 99,
           "h": 140,
           "fw": 33,
           "fh": 35
+        },
+        "nw": {
+          "file": "soldier-nw.png",
+          "w": 99,
+          "h": 140,
+          "fw": 33,
+          "fh": 35
+        },
+        "ne": {
+          "file": "soldier-ne.png",
+          "w": 99,
+          "h": 140,
+          "fw": 33,
+          "fh": 35
         }
       },
-      "loads": {}
+      "loads": {},
+      "idle": {
+        "file": "soldier-idle.png",
+        "w": 88,
+        "h": 165,
+        "fw": 22,
+        "fh": 33,
+        "frames": 20,
+        "fps": 5
+      }
     },
     "archer": {
       "worker": "hunter",
@@ -534,15 +762,95 @@
           "fw": 30,
           "fh": 63
         },
+        "se": {
+          "file": "archer-se.png",
+          "w": 90,
+          "h": 252,
+          "fw": 30,
+          "fh": 63
+        },
+        "sw": {
+          "file": "archer-sw.png",
+          "w": 90,
+          "h": 252,
+          "fw": 30,
+          "fh": 63
+        },
         "w": {
           "file": "archer-w.png",
           "w": 90,
           "h": 252,
           "fw": 30,
           "fh": 63
+        },
+        "nw": {
+          "file": "archer-nw.png",
+          "w": 90,
+          "h": 252,
+          "fw": 30,
+          "fh": 63
+        },
+        "ne": {
+          "file": "archer-ne.png",
+          "w": 90,
+          "h": 252,
+          "fw": 30,
+          "fh": 63
         }
       },
-      "loads": {}
+      "loads": {
+        "e": {
+          "file": "archer-load-e.png",
+          "w": 90,
+          "h": 252,
+          "fw": 30,
+          "fh": 63
+        },
+        "se": {
+          "file": "archer-load-se.png",
+          "w": 90,
+          "h": 252,
+          "fw": 30,
+          "fh": 63
+        },
+        "sw": {
+          "file": "archer-load-sw.png",
+          "w": 90,
+          "h": 252,
+          "fw": 30,
+          "fh": 63
+        },
+        "w": {
+          "file": "archer-load-w.png",
+          "w": 90,
+          "h": 252,
+          "fw": 30,
+          "fh": 63
+        },
+        "nw": {
+          "file": "archer-load-nw.png",
+          "w": 90,
+          "h": 252,
+          "fw": 30,
+          "fh": 63
+        },
+        "ne": {
+          "file": "archer-load-ne.png",
+          "w": 90,
+          "h": 252,
+          "fw": 30,
+          "fh": 63
+        }
+      },
+      "idle": {
+        "file": "archer-idle.png",
+        "w": 136,
+        "h": 235,
+        "fw": 34,
+        "fh": 47,
+        "frames": 20,
+        "fps": 10
+      }
     },
     "miner": {
       "worker": "miner",
@@ -560,15 +868,95 @@
           "fw": 46,
           "fh": 57
         },
+        "se": {
+          "file": "miner-se.png",
+          "w": 138,
+          "h": 228,
+          "fw": 46,
+          "fh": 57
+        },
+        "sw": {
+          "file": "miner-sw.png",
+          "w": 138,
+          "h": 228,
+          "fw": 46,
+          "fh": 57
+        },
         "w": {
           "file": "miner-w.png",
           "w": 138,
           "h": 228,
           "fw": 46,
           "fh": 57
+        },
+        "nw": {
+          "file": "miner-nw.png",
+          "w": 138,
+          "h": 228,
+          "fw": 46,
+          "fh": 57
+        },
+        "ne": {
+          "file": "miner-ne.png",
+          "w": 138,
+          "h": 228,
+          "fw": 46,
+          "fh": 57
         }
       },
-      "loads": {}
+      "loads": {
+        "e": {
+          "file": "miner-load-e.png",
+          "w": 164,
+          "h": 310,
+          "fw": 55,
+          "fh": 78
+        },
+        "se": {
+          "file": "miner-load-se.png",
+          "w": 164,
+          "h": 310,
+          "fw": 55,
+          "fh": 78
+        },
+        "sw": {
+          "file": "miner-load-sw.png",
+          "w": 164,
+          "h": 310,
+          "fw": 55,
+          "fh": 78
+        },
+        "w": {
+          "file": "miner-load-w.png",
+          "w": 164,
+          "h": 310,
+          "fw": 55,
+          "fh": 78
+        },
+        "nw": {
+          "file": "miner-load-nw.png",
+          "w": 164,
+          "h": 310,
+          "fw": 55,
+          "fh": 78
+        },
+        "ne": {
+          "file": "miner-load-ne.png",
+          "w": 164,
+          "h": 310,
+          "fw": 55,
+          "fh": 78
+        }
+      },
+      "idle": {
+        "file": "miner-idle.png",
+        "w": 29,
+        "h": 50,
+        "fw": 10,
+        "fh": 13,
+        "frames": 12,
+        "fps": 8
+      }
     },
     "fisher": {
       "worker": "fisher",
@@ -586,15 +974,52 @@
           "fw": 42,
           "fh": 74
         },
+        "se": {
+          "file": "fisher-se.png",
+          "w": 126,
+          "h": 296,
+          "fw": 42,
+          "fh": 74
+        },
+        "sw": {
+          "file": "fisher-sw.png",
+          "w": 126,
+          "h": 296,
+          "fw": 42,
+          "fh": 74
+        },
         "w": {
           "file": "fisher-w.png",
           "w": 126,
           "h": 296,
           "fw": 42,
           "fh": 74
+        },
+        "nw": {
+          "file": "fisher-nw.png",
+          "w": 126,
+          "h": 296,
+          "fw": 42,
+          "fh": 74
+        },
+        "ne": {
+          "file": "fisher-ne.png",
+          "w": 126,
+          "h": 296,
+          "fw": 42,
+          "fh": 74
         }
       },
-      "loads": {}
+      "loads": {},
+      "idle": {
+        "file": "fisher-idle.png",
+        "w": 28,
+        "h": 71,
+        "fw": 9,
+        "fh": 18,
+        "frames": 12,
+        "fps": 8
+      }
     },
     "baker": {
       "worker": "baker",
@@ -612,15 +1037,95 @@
           "fw": 29,
           "fh": 51
         },
+        "se": {
+          "file": "baker-se.png",
+          "w": 87,
+          "h": 204,
+          "fw": 29,
+          "fh": 51
+        },
+        "sw": {
+          "file": "baker-sw.png",
+          "w": 87,
+          "h": 204,
+          "fw": 29,
+          "fh": 51
+        },
         "w": {
           "file": "baker-w.png",
           "w": 87,
           "h": 204,
           "fw": 29,
           "fh": 51
+        },
+        "nw": {
+          "file": "baker-nw.png",
+          "w": 87,
+          "h": 204,
+          "fw": 29,
+          "fh": 51
+        },
+        "ne": {
+          "file": "baker-ne.png",
+          "w": 87,
+          "h": 204,
+          "fw": 29,
+          "fh": 51
         }
       },
-      "loads": {}
+      "loads": {
+        "e": {
+          "file": "baker-load-e.png",
+          "w": 120,
+          "h": 208,
+          "fw": 40,
+          "fh": 52
+        },
+        "se": {
+          "file": "baker-load-se.png",
+          "w": 120,
+          "h": 208,
+          "fw": 40,
+          "fh": 52
+        },
+        "sw": {
+          "file": "baker-load-sw.png",
+          "w": 120,
+          "h": 208,
+          "fw": 40,
+          "fh": 52
+        },
+        "w": {
+          "file": "baker-load-w.png",
+          "w": 120,
+          "h": 208,
+          "fw": 40,
+          "fh": 52
+        },
+        "nw": {
+          "file": "baker-load-nw.png",
+          "w": 120,
+          "h": 208,
+          "fw": 40,
+          "fh": 52
+        },
+        "ne": {
+          "file": "baker-load-ne.png",
+          "w": 120,
+          "h": 208,
+          "fw": 40,
+          "fh": 52
+        }
+      },
+      "idle": {
+        "file": "baker-idle.png",
+        "w": 21,
+        "h": 49,
+        "fw": 7,
+        "fh": 12,
+        "frames": 12,
+        "fps": 8
+      }
     }
   },
   "nature": {

@@ -68,7 +68,7 @@ function diamondTile(seed, base, blotchColors, opts = {}) {
     `<polygon points="0,33 66,40 66,66 0,33" fill="#000000" opacity="0.05"/>` +
     blobs + streaks + cracks +
     `</g>` +
-    `<path d="${DIAMOND}" fill="none" stroke="#000000" stroke-opacity="0.10" stroke-width="1"/>` +
+    `<path d="${DIAMOND}" fill="none" stroke="#000000" stroke-opacity="0.04" stroke-width="1"/>` +
     `</svg>`;
   return Buffer.from(svg);
 }

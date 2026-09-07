@@ -3,6 +3,7 @@ import { playSfx } from '../audio';
 import { BUILDINGS, INITIAL_STOCK, type BuildingId, type ResourceId } from '../data/buildings';
 import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_ROCKS, WL_TREES, WL_WHEAT, WL_WHEAT_ORDER, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
 import { DAY_LENGTH_MS, skyAt } from '../systems/daynight';
+import { findPath, smoothPath, type GridPos } from '../systems/pathfinding';
 import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
 import { tickJob, type ProductionJob, type Stock } from '../systems/economy';
 
@@ -22,10 +23,27 @@ const MAP = ISLAND_SIZE;
 
 interface Placed { id: BuildingId; tx: number; ty: number; sprite: Phaser.GameObjects.Container; done: number; total: number }
 
+type WlDir6 = 'e' | 'se' | 'sw' | 'w' | 'nw' | 'ne';
+
+interface Walker {
+  sprite: Phaser.GameObjects.Sprite;
+  shadow: Phaser.GameObjects.Image;
+  role: string;
+  kind: 'settler' | 'critter';
+  path: GridPos[];
+  targetPx: { x: number; y: number } | null;
+  speed: number;
+  state: 'idle' | 'walk' | 'work';
+  stateT: number;
+  onArrive: (() => void) | null;
+  loaded: boolean;
+}
+
 export class GameScene extends Phaser.Scene {
   stock: Stock = { ...INITIAL_STOCK };
   placed: Placed[] = [];
-  settlers: Phaser.GameObjects.Sprite[] = [];
+  walkers: Walker[] = [];
+  buildingTiles = new Set<string>();
   pendingBuild: BuildingId | null = null;
   territoryRadius = 7;
   center = { x: MAP / 2, y: MAP / 2 };
@@ -71,13 +89,25 @@ export class GameScene extends Phaser.Scene {
     }
     for (const [role, w] of Object.entries(WL_WORKERS)) {
       for (const [dir, d] of Object.entries(w.dirs)) {
+        if (!d) continue;
         this.load.spritesheet(`wl-${role}-${dir}`, `/assets/wl/people/${d.file}`, {
           frameWidth: d.fw, frameHeight: d.fh,
         });
       }
       for (const [dir, d] of Object.entries(w.loads ?? {})) {
+        if (!d) continue;
         this.load.spritesheet(`wl-${role}-load-${dir}`, `/assets/wl/people/${d.file}`, {
           frameWidth: d.fw, frameHeight: d.fh,
+        });
+      }
+      if (w.idle) {
+        this.load.spritesheet(`wl-${role}-idle`, `/assets/wl/people/${w.idle.file}`, {
+          frameWidth: w.idle.fw, frameHeight: w.idle.fh,
+        });
+      }
+      if (w.hack) {
+        this.load.spritesheet(`wl-${role}-hack`, `/assets/wl/people/${w.hack.file}`, {
+          frameWidth: w.hack.fw, frameHeight: w.hack.fh,
         });
       }
     }
@@ -153,6 +183,22 @@ export class GameScene extends Phaser.Scene {
           key,
           frames: this.anims.generateFrameNumbers(`wl-${role}-load-${dir}`, { start: 0, end: Math.min(w.grid.frames, total) - 1 }),
           frameRate: w.grid.fps,
+          repeat: -1,
+        });
+      }
+      if (w.idle && !this.anims.exists(`wl-idle-${role}`)) {
+        this.anims.create({
+          key: `wl-idle-${role}`,
+          frames: this.anims.generateFrameNumbers(`wl-${role}-idle`, { start: 0, end: w.idle.frames - 1 }),
+          frameRate: Math.min(w.idle.fps, 6),
+          repeat: -1,
+        });
+      }
+      if (w.hack && !this.anims.exists(`wl-hack-${role}`)) {
+        this.anims.create({
+          key: `wl-hack-${role}`,
+          frames: this.anims.generateFrameNumbers(`wl-${role}-hack`, { start: 0, end: w.hack.frames - 1 }),
+          frameRate: Math.min(w.hack.fps, 10),
           repeat: -1,
         });
       }
@@ -251,6 +297,36 @@ export class GameScene extends Phaser.Scene {
     const c = this.iso(this.center.x, this.center.y);
     this.add.circle(c.x, c.y - 8, this.territoryRadius * 68, 0xfbbf24, 0.07).setDepth(9390).setStrokeStyle(2, 0xfbbf24, 0.45);
     this.placeFoam();
+    this.placeMountainShades();
+    this.placeSparkles();
+  }
+
+  /** Sombra al sur de cada montaña: relieve sin geometría extra. */
+  private placeMountainShades() {
+    for (let ty = 0; ty < MAP; ty++) {
+      for (let tx = 0; tx < MAP; tx++) {
+        if (terrainAt(tx, ty) !== 'mountain') continue;
+        if (ty + 1 >= MAP) continue;
+        const { x, y } = this.iso(tx, ty + 1);
+        this.add.image(x, y - 6, 'shadow').setDepth(49).setAlpha(0.4).setScale(3.2, 1.6);
+      }
+    }
+  }
+
+  /** Destellos sobre el agua. */
+  private placeSparkles() {
+    const cells = this.waterCells.filter(() => Math.random() > 0.6).slice(0, 30);
+    for (const cell of cells) {
+      const { x, y } = this.iso(cell.x, cell.y);
+      const sp = this.add.circle(
+        x + Phaser.Math.Between(-30, 30), y + Phaser.Math.Between(-12, 12),
+        1.6, 0xffffff, 0,
+      ).setDepth(51);
+      this.tweens.add({
+        targets: sp, alpha: 0.8, duration: Phaser.Math.Between(700, 1800),
+        yoyo: true, repeat: -1, delay: Phaser.Math.Between(0, 2000),
+      });
+    }
   }
 
   private isWater(t: string): boolean {
@@ -482,51 +558,23 @@ export class GameScene extends Phaser.Scene {
         let tx = this.center.x;
         let ty = this.center.y;
         if (name === 'duck' && this.waterCells.length) {
-          const w = this.waterCells[Phaser.Math.Between(0, this.waterCells.length - 1)];
-          tx = Phaser.Math.Clamp(w.x + Phaser.Math.Between(-2, 2), 2, MAP - 3);
-          ty = Phaser.Math.Clamp(w.y + Phaser.Math.Between(-2, 2), 2, MAP - 3);
+          const wcell = this.waterCells[Phaser.Math.Between(0, this.waterCells.length - 1)];
+          tx = Phaser.Math.Clamp(wcell.x + Phaser.Math.Between(-2, 2), 2, MAP - 3);
+          ty = Phaser.Math.Clamp(wcell.y + Phaser.Math.Between(-2, 2), 2, MAP - 3);
         } else {
           tx = Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-7, 7)), 2, MAP - 3);
           ty = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-7, 7)), 2, MAP - 3);
         }
         const { x, y } = this.iso(tx, ty);
         const s = this.add.sprite(x, y - 8, `wl-crit-${name}-e`, 0).setDepth(7400);
-        s.setData('critter', name);
-        s.setScale(1.1);
+        s.setScale(name === 'bunny' ? 1.2 : 1.1);
         s.play(`wl-crit-${name}-e`);
-        this.wanderCritter(s);
+        const shadow = this.add.image(x, y - 1, 'shadow').setDepth(7399).setAlpha(0.5).setScale(0.8);
+        const w = this.makeWalker(s, shadow, name, 'critter');
+        w.speed = name === 'bunny' ? 85 : 45;
+        this.assignJob(w);
       }
     }
-  }
-
-  private wanderCritter(s: Phaser.GameObjects.Sprite) {
-    if (!s.active) return;
-    const name = s.getData('critter') as string;
-    // destino cercano aleatorio (los bichos no se alejan)
-    const cur = this.groundLayer.worldToTileXY(s.x, s.y) ?? { x: this.center.x, y: this.center.y };
-    let nx = Phaser.Math.Clamp(cur.x + Phaser.Math.Between(-3, 3), 2, MAP - 3);
-    let ny = Phaser.Math.Clamp(cur.y + Phaser.Math.Between(-3, 3), 2, MAP - 3);
-    if (name !== 'duck') {
-      // los terrestres evitan el agua (los patos sí nadan)
-      const t = terrainAt(nx, ny);
-      if (t === 'water' || t === 'waterB' || t === 'waterC') {
-        nx = Phaser.Math.Clamp(cur.x + Phaser.Math.Between(-3, 3), 2, MAP - 3);
-        ny = Phaser.Math.Clamp(cur.y + Phaser.Math.Between(-3, 3), 2, MAP - 3);
-      }
-    }
-    const { x, y } = this.iso(nx, ny);
-    const dir = x >= s.x ? 'e' : 'w';
-    const key = `wl-crit-${name}-${dir}`;
-    if (WL_CRITTERS[name]?.dirs[dir as 'e' | 'w'] && this.anims.exists(key)) {
-      s.setTexture(key);
-      s.play(key);
-    }
-    s.setDepth(7400 + ny);
-    this.tweens.add({
-      targets: s, x, y: y - 8,
-      duration: name === 'bunny' ? Phaser.Math.Between(900, 1600) : Phaser.Math.Between(2500, 5000),
-      ease: 'Sine.easeInOut', onComplete: () => this.wanderCritter(s),
-    });
   }
 
   private pickTile(list: { x: number; y: number }[], nearX: number, nearY: number, maxD: number): { x: number; y: number } {
@@ -546,56 +594,263 @@ export class GameScene extends Phaser.Scene {
     const ty = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-5, 5)), 3, MAP - 4);
     const { x, y } = this.iso(tx, ty);
     const s = this.add.sprite(x, y - 15, `wl-${tex}-e`, 0).setDepth(8000);
-    s.setData('role', tex);
-    s.setData('dir', 'e');
     const fh = WL_WORKERS[tex]?.dirs.e?.fh ?? 42;
     s.setScale(wlWorkerScale(fh));
-    s.play(`wl-walk-${tex}-e`);
-    this.settlers.push(s);
-    this.wanderRole(s);
+    const shadow = this.add.image(x, y - 1, 'shadow').setDepth(7999).setAlpha(0.6).setScale(1.2);
+    const w = this.makeWalker(s, shadow, tex, 'settler');
+    this.assignJob(w);
   }
 
-  private wanderRole(s: Phaser.GameObjects.Sprite) {
-    if (!s.active) return;
-    const role = s.getData('role') as string;
-    let tx = Phaser.Math.Between(3, MAP - 4);
-    let ty = Phaser.Math.Between(3, MAP - 4);
-    if (role === 'woodcutter' && this.forestTiles.length) {
-      const c = this.pickTile(this.forestTiles, this.center.x, this.center.y, 11);
-      tx = c.x; ty = c.y;
-    } else if (role === 'miner' && this.hillTiles.length) {
-      const c = this.pickTile(this.hillTiles, this.center.x, this.center.y, 11);
-      tx = c.x; ty = c.y;
-    } else if (role === 'fisher' && this.shoreTiles.length) {
-      const c = this.pickTile(this.shoreTiles, this.center.x, this.center.y, 13);
-      tx = c.x; ty = c.y;
-    } else if (role === 'carrier' && this.placed.length > 1) {
-      const a = this.placed[0];
-      const b = this.placed[Phaser.Math.Between(1, this.placed.length - 1)];
-      const t = Math.random() > 0.5 ? a : b;
-      tx = Phaser.Math.Clamp(t.tx + Phaser.Math.Between(-1, 1), 2, MAP - 3);
-      ty = Phaser.Math.Clamp(t.ty + Phaser.Math.Between(0, 2), 2, MAP - 3);
-    } else if ((role === 'soldier' || role === 'archer') && this.placed.length) {
-      const towers = this.placed.filter((p) => p.id === 'torre' || p.id === 'cuartel');
-      const t = towers.length ? towers[Phaser.Math.Between(0, towers.length - 1)] : this.placed[0];
-      tx = Phaser.Math.Clamp(t.tx + Phaser.Math.Between(-4, 4), 2, MAP - 3);
-      ty = Phaser.Math.Clamp(t.ty + Phaser.Math.Between(-4, 4), 2, MAP - 3);
-    } else {
-      tx = Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-6, 6)), 2, MAP - 3);
-      ty = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-6, 6)), 2, MAP - 3);
+  // ============ Motor de movimiento real (A* + waypoints + 6 dirs) ============
+  private dir6(dx: number, dy: number): 'e' | 'se' | 'sw' | 'w' | 'nw' | 'ne' {
+    const a = (Math.atan2(dy, dx) * 180) / Math.PI;
+    if (a >= -30 && a < 30) return 'e';
+    if (a >= 30 && a < 90) return 'se';
+    if (a >= 90 && a < 150) return 'sw';
+    if (a >= 150 || a < -150) return 'w';
+    if (a >= -150 && a < -90) return 'nw';
+    return 'ne';
+  }
+
+  private tileBlocked(tx: number, ty: number, gx: number, gy: number, allowWater = false): boolean {
+    if (tx < 1 || ty < 1 || tx >= MAP - 1 || ty >= MAP - 1) return true;
+    if (tx === gx && ty === gy) return false; // el destino siempre vale
+    const t = terrainAt(tx, ty);
+    if (!allowWater && (t === 'water' || t === 'waterB' || t === 'waterC')) return true;
+    if (t === 'mountain') return true;
+    if (this.buildingTiles.has(`${tx},${ty}`)) return true;
+    return false;
+  }
+
+  private walkerTile(w: Walker): GridPos {
+    const t = this.groundLayer.worldToTileXY(w.sprite.x, w.sprite.y);
+    return { x: Phaser.Math.Clamp(t?.x ?? this.center.x, 0, MAP - 1), y: Phaser.Math.Clamp(t?.y ?? this.center.y, 0, MAP - 1) };
+  }
+
+  private makeWalker(sprite: Phaser.GameObjects.Sprite, shadow: Phaser.GameObjects.Image, role: string, kind: 'settler' | 'critter'): Walker {
+    const w: Walker = {
+      sprite, shadow, role, kind, path: [], targetPx: null,
+      speed: kind === 'critter' ? 55 : 68, state: 'idle', stateT: Math.random() * 1.5,
+      onArrive: null, loaded: false,
+    };
+    this.walkers.push(w);
+    return w;
+  }
+
+  private sendWalker(w: Walker, tx: number, ty: number, onArrive: (() => void) | null = null): boolean {
+    const from = this.walkerTile(w);
+    const allowWater = w.kind === 'critter' && w.role === 'duck';
+    const blocked = (x: number, y: number) => this.tileBlocked(x, y, tx, ty, allowWater);
+    const raw = findPath(from, { x: tx, y: ty }, MAP, MAP, blocked);
+    if (!raw || raw.length < 2) {
+      w.state = 'idle';
+      w.stateT = 0.5 + Math.random();
+      w.onArrive = null;
+      this.playIdle(w);
+      return false;
     }
-    const { x, y } = this.iso(tx, ty);
-    // dirección este/oeste según el destino (los sheets son direccionales);
-    // los portadores alternan vacío/cargado para que se vea el acarreo
-    const dir = x >= s.x ? 'e' : 'w';
-    const loaded = role === 'carrier' && WL_WORKERS[role]?.loads?.[dir as 'e' | 'w'] && Math.random() > 0.5;
-    const key = loaded ? `wl-walkload-${role}-${dir}` : `wl-walk-${role}-${dir}`;
-    if ((loaded || WL_WORKERS[role]?.dirs[dir as 'e' | 'w']) && this.anims.exists(key)) {
-      s.setTexture(loaded ? `wl-${role}-load-${dir}` : `wl-${role}-${dir}`);
-      s.play(key);
+    w.path = smoothPath(raw, blocked).slice(1);
+    w.onArrive = onArrive;
+    w.state = 'walk';
+    const next = w.path.shift()!;
+    const p = this.iso(next.x, next.y);
+    w.targetPx = { x: p.x, y: p.y - 15 };
+    return true;
+  }
+
+  private playWalk(w: Walker, dx: number, dy: number) {
+    const dir = this.dir6(dx, dy);
+    const role = w.role;
+    if (w.kind === 'critter') {
+      const key = `wl-crit-${role}-${dir}`;
+      if (WL_CRITTERS[role]?.dirs[dir] && this.anims.exists(key)) {
+        w.sprite.setTexture(`wl-crit-${role}-${dir}`);
+        w.sprite.play(key, true);
+        return;
+      }
     }
-    s.setDepth(7500 + ty * 2);
-    this.tweens.add({ targets: s, x, y: y - 15, duration: Phaser.Math.Between(2200, 5200), ease: 'Sine.easeInOut', onComplete: () => this.wanderRole(s) });
+    const prefix = w.loaded && WL_WORKERS[role]?.loads?.[dir] ? `wl-${role}-load-${dir}` : `wl-${role}-${dir}`;
+    const key = w.loaded && WL_WORKERS[role]?.loads?.[dir] ? `wl-walkload-${role}-${dir}` : `wl-walk-${role}-${dir}`;
+    const has = w.loaded
+      ? WL_WORKERS[role]?.loads?.[dir as 'e' | 'se' | 'sw' | 'w' | 'nw' | 'ne']
+      : WL_WORKERS[role]?.dirs[dir as 'e' | 'se' | 'sw' | 'w' | 'nw' | 'ne'];
+    if (has && this.anims.exists(key)) {
+      w.sprite.setTexture(prefix);
+      w.sprite.play(key, true);
+    } else if (WL_WORKERS[role]?.dirs.e && this.anims.exists(`wl-walk-${role}-e`)) {
+      // fallback este/oeste si falta alguna diagonal
+      const fb = dx >= 0 ? 'e' : 'w';
+      w.sprite.setTexture(`wl-${role}-${fb}`);
+      w.sprite.play(`wl-walk-${role}-${fb}`, true);
+    }
+  }
+
+  private playIdle(w: Walker) {
+    if (w.kind === 'critter') return;
+    const key = `wl-idle-${w.role}`;
+    if (WL_WORKERS[w.role]?.idle && this.anims.exists(key)) {
+      w.sprite.setTexture(`wl-${w.role}-idle`);
+      w.sprite.play(key, true);
+    }
+  }
+
+  private playWork(w: Walker) {
+    const key = `wl-hack-${w.role}`;
+    if (WL_WORKERS[w.role]?.hack && this.anims.exists(key)) {
+      w.sprite.setTexture(`wl-${w.role}-hack`);
+      w.sprite.play(key, true);
+      return true;
+    }
+    this.playIdle(w);
+    return false;
+  }
+
+  private rest(w: Walker, secs: number, then: (() => void) | null = null) {
+    w.state = 'idle';
+    w.stateT = secs;
+    w.onArrive = then;
+    this.playIdle(w);
+  }
+
+  private updateWalkers(deltaMs: number) {
+    const dt = deltaMs / 1000;
+    for (const w of this.walkers) {
+      if (!w.sprite.active) continue;
+      if (w.state === 'idle' || w.state === 'work') {
+        w.stateT -= dt;
+        if (w.stateT <= 0) {
+          const cb = w.onArrive;
+          w.onArrive = null;
+          w.state = 'idle';
+          if (cb) cb();
+          else this.assignJob(w);
+        }
+        continue;
+      }
+      // walk
+      if (!w.targetPx) {
+        const cb = w.onArrive;
+        w.onArrive = null;
+        w.state = 'idle';
+        this.playIdle(w);
+        if (cb) cb();
+        else this.assignJob(w);
+        continue;
+      }
+      const s = w.sprite;
+      const dx = w.targetPx.x - s.x;
+      const dy = w.targetPx.y - s.y;
+      const dist = Math.hypot(dx, dy);
+      const step = w.speed * dt;
+      if (dist <= Math.max(4, step)) {
+        s.x = w.targetPx.x;
+        s.y = w.targetPx.y;
+        const next = w.path.shift();
+        if (!next) {
+          w.targetPx = null;
+          const cb = w.onArrive;
+          w.onArrive = null;
+          w.state = 'idle';
+          this.playIdle(w);
+          if (cb) cb();
+          else this.assignJob(w);
+        } else {
+          const p = this.iso(next.x, next.y);
+          w.targetPx = { x: p.x, y: p.y - 15 };
+        }
+      } else {
+        s.x += (dx / dist) * step;
+        s.y += (dy / dist) * step;
+        this.playWalk(w, dx, dy);
+      }
+      w.shadow.setPosition(s.x, s.y + 13);
+      s.setDepth(7500 + Math.round(s.y / 4));
+      w.shadow.setDepth(7499 + Math.round(s.y / 4));
+    }
+  }
+
+  /** Cerebro por oficio: encadena ir → trabajar → volver. */
+  private assignJob(w: Walker) {
+    if (!w.sprite.active || w.state === 'walk' || w.state === 'work') return;
+    const role = w.role;
+    if (w.kind === 'critter') {
+      const cur = this.walkerTile(w);
+      const nx = Phaser.Math.Clamp(cur.x + Phaser.Math.Between(-4, 4), 2, MAP - 3);
+      const ny = Phaser.Math.Clamp(cur.y + Phaser.Math.Between(-4, 4), 2, MAP - 3);
+      if (!this.sendWalker(w, nx, ny)) this.rest(w, 1 + Math.random() * 2);
+      return;
+    }
+    const cabana = this.placed.find((p) => p.id === 'cabanaLenador');
+    const almacen = this.placed[0];
+    const mina = this.placed.find((p) => p.id === 'minaCarbon' || p.id === 'minaHierro' || p.id === 'minaOro');
+    const near = (tiles: { x: number; y: number }[], maxD: number) => {
+      if (!tiles.length) return null;
+      return this.pickTile(tiles, this.center.x, this.center.y, maxD);
+    };
+    switch (role) {
+      case 'woodcutter': {
+        if (!cabana) { this.stroll(w); break; }
+        const t = near(this.forestTiles, 12);
+        if (!t) { this.stroll(w); break; }
+        if (!this.sendWalker(w, t.x, t.y, () => {
+          w.state = 'work';
+          w.stateT = 3.5 + Math.random() * 1.5;
+          w.onArrive = () => this.sendWalker(w, cabana.tx, cabana.ty, () => this.assignJob(w));
+          if (this.playWork(w)) {
+            this.time.delayedCall(900, () => playSfx('chop'));
+            this.time.delayedCall(2400, () => playSfx('chop'));
+          }
+        })) this.stroll(w);
+        break;
+      }
+      case 'miner': {
+        if (!mina || !almacen) { this.stroll(w); break; }
+        if (!this.sendWalker(w, mina.tx, mina.ty, () => {
+          w.state = 'work'; w.stateT = 3 + Math.random() * 2;
+          w.onArrive = () => this.sendWalker(w, almacen.tx, almacen.ty, () => this.assignJob(w));
+          this.playWork(w);
+        })) this.stroll(w);
+        break;
+      }
+      case 'fisher': {
+        const t = near(this.shoreTiles, 13);
+        if (!t) { this.stroll(w); break; }
+        if (!this.sendWalker(w, t.x, t.y, () => {
+          w.state = 'work'; w.stateT = 4 + Math.random() * 3;
+          w.onArrive = () => this.assignJob(w);
+          this.playWork(w);
+        })) this.stroll(w);
+        break;
+      }
+      case 'carrier': {
+        if (this.placed.length < 2 || !almacen) { this.stroll(w); break; }
+        const b = this.placed[Phaser.Math.Between(1, this.placed.length - 1)];
+        w.loaded = false;
+        if (!this.sendWalker(w, b.tx, b.ty, () => {
+          w.loaded = true; // carga y vuelve al almacén
+          this.sendWalker(w, almacen.tx, almacen.ty, () => { w.loaded = false; this.assignJob(w); });
+        })) this.stroll(w);
+        break;
+      }
+      case 'soldier':
+      case 'archer': {
+        const towers = this.placed.filter((p) => p.id === 'torre' || p.id === 'cuartel');
+        const t = towers.length ? towers[Phaser.Math.Between(0, towers.length - 1)] : almacen;
+        if (!t) { this.stroll(w); break; }
+        const gx = Phaser.Math.Clamp(t.tx + Phaser.Math.Between(-3, 3), 2, MAP - 3);
+        const gy = Phaser.Math.Clamp(t.ty + Phaser.Math.Between(-3, 3), 2, MAP - 3);
+        if (!this.sendWalker(w, gx, gy, () => this.rest(w, 2 + Math.random() * 3))) this.stroll(w);
+        break;
+      }
+      default:
+        this.stroll(w);
+    }
+  }
+
+  private stroll(w: Walker) {
+    const nx = Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-6, 6)), 2, MAP - 3);
+    const ny = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-6, 6)), 2, MAP - 3);
+    if (!this.sendWalker(w, nx, ny)) this.rest(w, 1 + Math.random() * 2);
   }
 
   /** Coloca lo que el diseñador marcó en Tiled (capa Logica). */
@@ -612,11 +867,11 @@ export class GameScene extends Phaser.Scene {
       else if (oficio && WL_WORKERS[oficio]) {
         const { x, y } = this.iso(t.x, t.y);
         const s = this.add.sprite(x, y - 15, `wl-${oficio}-e`, 0).setDepth(8000);
-        s.setData('role', oficio);
         s.setScale(wlWorkerScale(WL_WORKERS[oficio].dirs.e?.fh ?? 42));
         s.play(`wl-walk-${oficio}-e`);
-        this.settlers.push(s);
-        this.wanderRole(s);
+        const shadow = this.add.image(x, y - 1, 'shadow').setDepth(7999).setAlpha(0.6).setScale(1.2);
+        const w = this.makeWalker(s, shadow, oficio, 'settler');
+        this.assignJob(w);
       }
     }
   }
@@ -707,6 +962,7 @@ export class GameScene extends Phaser.Scene {
       onComplete: () => { buildFx?.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, scale); },
     });
     this.placed.push({ id, tx, ty, sprite: c, done: 0, total: def.tiempoConstruccionMs });
+    this.buildingTiles.add(`${tx},${ty}`);
     if (WL_SMOKE.has(id)) this.addSmoke(x, y - art.h * scale * 0.85, depth + 1);
     if (id === 'granja') this.plantWheat(x, y, depth);
     // farol nocturno sobre la puerta
@@ -718,11 +974,11 @@ export class GameScene extends Phaser.Scene {
       if (!free) playSfx('sword');
       for (const t of ['soldier', 'archer']) {
         const s = this.add.sprite(x + 30, y - 15, `wl-${t}-e`, 0).setDepth(8000);
-        s.setData('role', t);
         s.setScale(wlWorkerScale(WL_WORKERS[t]?.dirs.e?.fh ?? 42));
         s.play(`wl-walk-${t}-e`);
-        this.settlers.push(s);
-        this.wanderRole(s);
+        const shadow = this.add.image(x + 30, y - 1, 'shadow').setDepth(7999).setAlpha(0.6).setScale(1.2);
+        const w = this.makeWalker(s, shadow, t, 'settler');
+        this.assignJob(w);
       }
     }
     this.updateHud();
@@ -745,14 +1001,14 @@ export class GameScene extends Phaser.Scene {
       case 'aserradero': add('logs', 62, -4); break;
       case 'cantera': add('stones', 58, -4); break;
       case 'residenciaS': case 'residenciaM': case 'residenciaL':
-        add('fence', -62, -2); add('flowers', 52, 0); break;
+        add('fence', -62, -2); add('wl-bush-1', 52, 0); break;
       case 'granja':
         add('fence', -68, -2); add('fence', 68, -2); break;
-      case 'pozo': add('flowers', -44, 0); break;
+      case 'pozo': add('wl-bush-1', -44, 0); break;
       case 'fundicion': case 'herreria': add('crates', 62, -4); break;
       case 'cuartel': case 'armeria': add('fence', -64, -2); add('fence', 64, -2); break;
       case 'torre': add('stones', 52, -2, 0.8); break;
-      case 'ornamento': add('flowers', -58, 0); add('flowers', 58, 0); add('tuft', -38, 2); add('tuft', 38, 2); break;
+      case 'ornamento': add('wl-bush-1', -58, 0); add('wl-bush-2', 58, 0); add('tuft', -38, 2); add('tuft', 38, 2); break;
       default: break;
     }
   }
@@ -876,7 +1132,7 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
-  override update() {
+  override update(_time: number, delta: number) {
     const cam = this.cameras.main;
     const speed = 22 / cam.zoom;
     const keys = this.input.keyboard?.createCursorKeys();
@@ -884,5 +1140,6 @@ export class GameScene extends Phaser.Scene {
     if (keys?.right.isDown || this.wasd?.D.isDown) cam.scrollX += speed;
     if (keys?.up.isDown || this.wasd?.W.isDown) cam.scrollY -= speed;
     if (keys?.down.isDown || this.wasd?.S.isDown) cam.scrollY += speed;
+    this.updateWalkers(Math.min(delta, 100));
   }
 }

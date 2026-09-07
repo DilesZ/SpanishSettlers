@@ -130,16 +130,19 @@ for (const [id, dir] of Object.entries(BUILD_MAP)) {
 }
 
 const workers = {};
-const LOADS = new Set(['carrier']);
 for (const [role, worker] of Object.entries(WORKER_MAP)) {
   const src = join(WL, 'workers/barbarians', worker);
   const lua = join(src, 'init.lua');
   if (!existsSync(lua)) { fail.push(`worker ${role}: falta ${worker}`); continue; }
-  const grid = sheetOf(readFileSync(lua, 'utf8'), 'walk') ?? { fps: 10, frames: 10, columns: 3, rows: 4 };
+  const luaText = readFileSync(lua, 'utf8');
+  const grid = sheetOf(luaText, 'walk') ?? { fps: 10, frames: 10, columns: 3, rows: 4 };
   const entry = { worker, grid, dirs: {}, loads: {} };
-  const kinds = LOADS.has(role) ? [['', 'dirs', 'walk'], ['load-', 'loads', 'walkload']] : [['', 'dirs', 'walk']];
+  const pick = (prefix) => ['2', '1', '0.5'].map((s) => join(src, `${prefix}_${s}.png`)).find((f) => existsSync(f));
+  const kinds = [['', 'dirs', 'walk']];
+  if (pick('walkload_e')) kinds.push(['load-', 'loads', 'walkload']);
+  const DIRS6 = ['e', 'se', 'sw', 'w', 'nw', 'ne'];
   for (const [prefix, slot, base] of kinds) {
-    for (const d of ['e', 'w']) {
+    for (const d of DIRS6) {
       let file = null;
       for (const s of ['2', '1', '0.5']) {
         const cand = join(src, `${base}_${d}_${s}.png`);
@@ -152,6 +155,19 @@ for (const [role, worker] of Object.entries(WORKER_MAP)) {
       copyFileSync(file, join(OUT, 'people', `${role}-${prefix}${d}.png`));
       entry[slot][d] = { file: `${role}-${prefix}${d}.png`, w: meta.width, h: meta.height, fw, fh: rh };
     }
+  }
+  // idle omnidireccional + hack (trabajo) si existen
+  for (const anim of ['idle', 'hack']) {
+    const f = pick(anim);
+    if (!f) continue;
+    const blk = blockOf(luaText, anim);
+    const cols = blk ? getNum(blk, 'columns') ?? 3 : 3;
+    const rows = blk ? getNum(blk, 'rows') ?? 4 : 4;
+    const frames = blk ? getNum(blk, 'frames') ?? cols * rows : cols * rows;
+    const fps = blk ? getNum(blk, 'fps') ?? 8 : 8;
+    const meta = await sharp(f).metadata();
+    copyFileSync(f, join(OUT, 'people', `${role}-${anim}.png`));
+    entry[anim] = { file: `${role}-${anim}.png`, w: meta.width, h: meta.height, fw: Math.round(meta.width / cols), fh: Math.round(meta.height / rows), frames, fps };
   }
   workers[role] = entry;
 }
@@ -281,7 +297,8 @@ const ts =
   `export interface WlSheet { file: string; fw: number; fh: number; frames: number; fps: number }\n` +
   `export interface WlBuilding { w: number; h: number; hotspot: [number, number]; src: string; mode?: 'sheet'; sheet?: WlSheet; build?: WlSheet & { hotspot: [number, number] } }\n` +
   `export interface WlWorkerDir { file: string; w: number; h: number; fw: number; fh: number }\n` +
-  `export interface WlWorker { worker: string; grid: { fps: number; frames: number; columns: number; rows: number }; dirs: Partial<Record<'e' | 'w', WlWorkerDir>>; loads?: Partial<Record<'e' | 'w', WlWorkerDir>> }\n` +
+  `export interface WlWorkerAnim { file: string; w: number; h: number; fw: number; fh: number; frames: number; fps: number }\n` +
+  `export interface WlWorker { worker: string; grid: { fps: number; frames: number; columns: number; rows: number }; dirs: Partial<Record<string, WlWorkerDir>>; loads?: Partial<Record<string, WlWorkerDir>>; idle?: WlWorkerAnim; hack?: WlWorkerAnim }\n` +
   `export const WL_BUILDINGS: Record<string, WlBuilding> = ${JSON.stringify(buildings)};\n` +
   `export const WL_WORKERS: Record<string, WlWorker> = ${JSON.stringify(workers)};\n` +
   `export interface WlNatureItem { w: number; h: number; hotspot: [number, number]; sheet?: { fps: number; columns: number; rows: number; frames: number } | null }\n` +
