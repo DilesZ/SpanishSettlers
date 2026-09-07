@@ -118,7 +118,8 @@ export class GameScene extends Phaser.Scene {
         this.decorate(tx, ty, t, x, y);
       }
     }
-    // marcador hover (diamante)    this.hoverMarker = this.add.graphics().setDepth(9400);
+    // marcador hover (diamante)
+    this.hoverMarker = this.add.graphics().setDepth(9400);
     this.hoverMarker.lineStyle(2, 0xfde68a, 0.9);
     this.hoverMarker.beginPath();
     this.hoverMarker.moveTo(0, -TILE_H / 2);
