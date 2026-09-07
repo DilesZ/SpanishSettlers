@@ -48,6 +48,10 @@ export class GameScene extends Phaser.Scene {
   preload() {
     this.load.tilemapTiledJSON('isla-01', 'assets/maps/isla-01.json');
     this.load.image('terreno', 'assets/terrain-sheet.png');
+    this.load.image('foam-ne', 'assets/foam-ne.png');
+    this.load.image('foam-se', 'assets/foam-se.png');
+    this.load.image('foam-sw', 'assets/foam-sw.png');
+    this.load.image('foam-nw', 'assets/foam-nw.png');
   }
 
   create() {
@@ -88,8 +92,7 @@ export class GameScene extends Phaser.Scene {
         this.decorate(tx, ty, t, x, y);
       }
     }
-    // marcador hover (diamante)
-    this.hoverMarker = this.add.graphics().setDepth(9400);
+    // marcador hover (diamante)    this.hoverMarker = this.add.graphics().setDepth(9400);
     this.hoverMarker.lineStyle(2, 0xfde68a, 0.9);
     this.hoverMarker.beginPath();
     this.hoverMarker.moveTo(0, -TILE_H / 2);
@@ -102,6 +105,33 @@ export class GameScene extends Phaser.Scene {
 
     const c = this.iso(this.center.x, this.center.y);
     this.add.circle(c.x, c.y - 8, this.territoryRadius * 68, 0xfbbf24, 0.07).setDepth(9390).setStrokeStyle(2, 0xfbbf24, 0.45);
+    this.placeFoam();
+  }
+
+  private isWater(t: string): boolean {
+    return t === 'water' || t === 'waterB' || t === 'waterC';
+  }
+
+  /** Espuma en los bordes donde el agua toca tierra (estilo S4). */
+  private placeFoam() {
+    const at = (tx: number, ty: number): string | null =>
+      tx < 0 || ty < 0 || tx >= MAP || ty >= MAP ? null : terrainAt(tx, ty);
+    for (let ty = 0; ty < MAP; ty++) {
+      for (let tx = 0; tx < MAP; tx++) {
+        if (!this.isWater(terrainAt(tx, ty))) continue;
+        const { x, y } = this.iso(tx, ty);
+        const edges: [number, number, string][] = [
+          [1, 0, 'foam-se'], [-1, 0, 'foam-nw'], [0, 1, 'foam-sw'], [0, -1, 'foam-ne'],
+        ];
+        for (const [dx, dy, tex] of edges) {
+          const nb = at(tx + dx, ty + dy);
+          if (nb !== null && !this.isWater(nb)) {
+            const f = this.add.image(x, y, tex).setDepth(50);
+            this.tweens.add({ targets: f, alpha: 0.55, duration: 1400 + Math.random() * 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+          }
+        }
+      }
+    }
   }
 
   private decorate(tx: number, ty: number, t: string, x: number, y: number) {
@@ -137,7 +167,7 @@ export class GameScene extends Phaser.Scene {
 
   private setupCamera() {
     const cam = this.cameras.main;
-    cam.setZoom(0.75);
+    cam.setZoom(0.7);
     cam.centerOn(0, 450);
     this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
       cam.setZoom(Phaser.Math.Clamp(cam.zoom * (dy > 0 ? 0.9 : 1.1), 0.3, 2));
