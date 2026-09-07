@@ -109,6 +109,18 @@ export default function PlayPage() {
                 {inspect.produciendo ? ' ●' : ' ○'}
               </div>
             )}
+            {inspect.id === 'cuartel' && (
+              <button
+                onClick={() => {
+                  unlockAudio();
+                  const w = window as unknown as { __game?: { recruit: () => boolean } };
+                  w.__game?.recruit();
+                }}
+                className="mt-2 rounded-full bg-red-700/60 px-3 py-1 text-xs font-bold hover:bg-red-600/60"
+              >
+                ⚔ Reclutar (1⚔ + 1🍞)
+              </button>
+            )}
           </div>
           <button onClick={() => setInspect(null)} className="rounded-full border border-white/20 px-3 py-1 text-xs hover:bg-white/10">Cerrar</button>
         </section>

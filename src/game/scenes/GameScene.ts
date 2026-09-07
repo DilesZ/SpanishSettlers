@@ -4,6 +4,7 @@ import { BUILDINGS, INITIAL_STOCK, RECIPES, type BuildingId, type ResourceId } f
 import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_RES_ICONS, WL_ROCKS, WL_SHIPS, WL_TREES, WL_WHEAT, WL_WHEAT_ORDER, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
 import { DAY_LENGTH_MS, skyAt } from '../systems/daynight';
 import { findPath, smoothPath, type GridPos } from '../systems/pathfinding';
+import { applyDamage, recruitCost, soldierDps, towerDps, waveSpec } from '../systems/combat';
 import { goodsFor, isNavigable, pickFishingCircuit, touchesWater } from '../systems/ships';
 import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
 import { tickJob, type ProductionJob, type Stock } from '../systems/economy';
@@ -41,6 +42,23 @@ interface Walker {
   loaded: boolean;
   goods: ResourceId | null;
   goodsIcon: Phaser.GameObjects.Image | null;
+  hp: number;
+  maxHp: number;
+  foe: Enemy | null;
+}
+
+interface Enemy {
+  sprite: Phaser.GameObjects.Sprite;
+  shadow: Phaser.GameObjects.Image;
+  hp: number;
+  maxHp: number;
+  dmg: number;
+  path: GridPos[];
+  targetPx: { x: number; y: number } | null;
+  speed: number;
+  target: GridPos | null;
+  attackT: number;
+  bar: Phaser.GameObjects.Graphics;
 }
 
 interface Ship {
@@ -81,6 +99,10 @@ export class GameScene extends Phaser.Scene {
   private wheatPlots: { sprite: Phaser.GameObjects.Sprite; stageIdx: number }[] = [];
   private stars: Phaser.GameObjects.Arc[] = [];
   private lanterns: Phaser.GameObjects.Image[] = [];
+  private enemies: Enemy[] = [];
+  private buildingHp = new Map<string, { hp: number; maxHp: number; bar: Phaser.GameObjects.Graphics }>();
+  private waveNo = 0;
+  private kills = 0;
 
   constructor() {
     super('game');
@@ -305,11 +327,17 @@ export class GameScene extends Phaser.Scene {
     this.time.addEvent({ delay: 700, loop: true, callback: () => this.animateWater() });
     this.time.addEvent({ delay: 6000, loop: true, callback: () => this.wheatTick() });
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.skyTick() });
+    this.time.addEvent({ delay: 500, loop: true, callback: () => this.combatTick() });
+    this.time.delayedCall(75000, () => this.spawnWave());
+    this.time.addEvent({ delay: 100000, loop: true, callback: () => this.spawnWave() });
     this.scale.on('resize', () => this.layoutMinimap());
     // demo para fotos/tests: ?demo=puerto coloca un puerto junto al agua
     try {
-      if (new URLSearchParams(window.location.search).get('demo') === 'puerto') {
+      const q = new URLSearchParams(window.location.search).get('demo');
+      if (q === 'puerto') {
         this.time.delayedCall(2500, () => this.demoPort());
+      } else if (q === 'raid') {
+        this.time.delayedCall(6000, () => this.spawnWave());
       }
     } catch { /* noop */ }
   }
@@ -715,6 +743,7 @@ export class GameScene extends Phaser.Scene {
       sprite, shadow, role, kind, path: [], targetPx: null,
       speed: kind === 'critter' ? 55 : 68, state: 'idle', stateT: Math.random() * 1.5,
       onArrive: null, loaded: false, goods: null, goodsIcon: null,
+      hp: 30, maxHp: 30, foe: null,
     };
     this.walkers.push(w);
     return w;
@@ -964,6 +993,294 @@ export class GameScene extends Phaser.Scene {
       }
       s.setDepth(4500);
     }
+  }
+
+  // ============ Combate defensivo: oleadas, torres y soldados ============
+  private enemyTile(e: Enemy): GridPos {
+    const t = this.groundLayer.worldToTileXY(e.sprite.x, e.sprite.y);
+    return { x: Phaser.Math.Clamp(t?.x ?? 0, 0, MAP - 1), y: Phaser.Math.Clamp(t?.y ?? 0, 0, MAP - 1) };
+  }
+
+  private drawBar(bar: Phaser.GameObjects.Graphics, x: number, y: number, frac: number, color: number) {
+    bar.clear();
+    if (frac >= 1) return;
+    bar.fillStyle(0x000000, 0.7);
+    bar.fillRect(x - 16, y, 32, 5);
+    bar.fillStyle(color, 1);
+    bar.fillRect(x - 15, y + 1, 30 * Math.max(0, frac), 3);
+  }
+
+  private nearestBuilding(tx: number, ty: number): Placed | null {
+    let best: Placed | null = null;
+    let bestD = Infinity;
+    for (const p of this.placed) {
+      const d = Math.hypot(p.tx - tx, p.ty - ty);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return best;
+  }
+
+  private spawnWave() {
+    this.waveNo++;
+    const spec = waveSpec(this.waveNo);
+    // borde del mapa: loseta de tierra aleatoria en el perímetro
+    const edge: GridPos[] = [];
+    for (let i = 2; i < MAP - 2; i++) {
+      edge.push({ x: i, y: 2 }, { x: i, y: MAP - 3 }, { x: 2, y: i }, { x: MAP - 3, y: i });
+    }
+    const land = edge.filter((p) => {
+      const t = terrainAt(p.x, p.y);
+      return t !== 'water' && t !== 'waterB' && t !== 'waterC' && t !== 'mountain';
+    });
+    if (!land.length || !this.placed.length) return;
+    for (let i = 0; i < spec.count; i++) {
+      const s = land[Phaser.Math.Between(0, land.length - 1)];
+      const { x, y } = this.iso(s.x, s.y);
+      const sprite = this.add.sprite(x, y - 15, 'wl-soldier-e', 0).setDepth(8000);
+      sprite.setTint(0x883333);
+      sprite.setScale(wlWorkerScale(WL_WORKERS.soldier?.dirs.e?.fh ?? 42));
+      sprite.play('wl-walk-soldier-e');
+      const shadow = this.add.image(x, y - 1, 'shadow').setDepth(7999).setAlpha(0.6).setScale(1.2);
+      const bar = this.add.graphics().setDepth(8200);
+      const e: Enemy = {
+        sprite, shadow, hp: spec.enemyHp, maxHp: spec.enemyHp, dmg: spec.enemyDmg,
+        path: [], targetPx: null, speed: 60, target: null, attackT: 0, bar,
+      };
+      this.enemies.push(e);
+      this.sendEnemy(e);
+    }
+    this.hintText?.setText(`⚔ ¡Oleada ${this.waveNo}! ${spec.count} incursores se acercan`).setY(44);
+    playSfx('sword');
+    this.time.delayedCall(4000, () => this.hintText.setText(''));
+  }
+
+  private sendEnemy(e: Enemy) {
+    const from = this.enemyTile(e);
+    const target = this.nearestBuilding(from.x, from.y);
+    if (!target) { e.target = null; e.targetPx = null; return; }
+    e.target = { x: target.tx, y: target.ty };
+    const raw = findPath(from, e.target, MAP, MAP, (x, y) => this.tileBlocked(x, y, e.target!.x, e.target!.y));
+    if (!raw || raw.length < 2) { e.targetPx = null; return; }
+    e.path = smoothPath(raw, (x, y) => this.tileBlocked(x, y, e.target!.x, e.target!.y)).slice(1);
+    const next = e.path.shift()!;
+    const p = this.iso(next.x, next.y);
+    e.targetPx = { x: p.x, y: p.y - 15 };
+  }
+
+  private updateEnemies(dt: number) {
+    for (const e of this.enemies) {
+      const s = e.sprite;
+      if (!s.active) continue;
+      if (e.targetPx) {
+        const dx = e.targetPx.x - s.x;
+        const dy = e.targetPx.y - s.y;
+        const dist = Math.hypot(dx, dy);
+        const step = e.speed * dt;
+        if (dist <= Math.max(5, step)) {
+          s.x = e.targetPx.x;
+          s.y = e.targetPx.y;
+          const next = e.path.shift();
+          if (!next) {
+            e.targetPx = null;
+          } else {
+            const p = this.iso(next.x, next.y);
+            e.targetPx = { x: p.x, y: p.y - 15 };
+          }
+        } else {
+          s.x += (dx / dist) * step;
+          s.y += (dy / dist) * step;
+          const dir = this.dir6(dx, dy);
+          const key = `wl-walk-soldier-${dir}`;
+          if (this.anims.exists(key)) {
+            s.setTexture(`wl-soldier-${dir}`);
+            s.play(key, true);
+          }
+        }
+        e.shadow.setPosition(s.x, s.y + 13);
+        s.setDepth(7500 + Math.round(s.y / 4));
+      }
+      this.drawBar(e.bar, s.x, s.y - 52, e.hp / e.maxHp, 0xef4444);
+    }
+  }
+
+  private combatTick() {
+    // torres disparan al incursor más cercano (radio 5 losetas)
+    for (const p of this.placed) {
+      if (p.id !== 'torre') continue;
+      let best: Enemy | null = null;
+      let bestD = 5;
+      for (const e of this.enemies) {
+        if (!e.sprite.active) continue;
+        const t = this.enemyTile(e);
+        const d = Math.hypot(t.x - p.tx, t.y - p.ty);
+        if (d < bestD) { bestD = d; best = e; }
+      }
+      if (best) {
+        const { x: x1, y: y1 } = this.iso(p.tx, p.ty);
+        const proj = this.add.circle(x1, y1 - 70, 3, 0xffe08a, 1).setDepth(8600);
+        this.tweens.add({ targets: proj, x: best.sprite.x, y: best.sprite.y - 15, duration: 220 });
+        const target = best;
+        this.time.delayedCall(230, () => {
+          proj.destroy();
+          if (!target.sprite.active) return;
+          if (applyDamage(target, towerDps())) this.killEnemy(target);
+          playSfx('chop');
+        });
+      }
+    }
+    // soldados propios traban combate cuerpo a cuerpo (radio ~1.2 losetas)
+    for (const w of this.walkers) {
+      if (w.kind !== 'settler' || (w.role !== 'soldier' && w.role !== 'archer')) continue;
+      if (!w.sprite.active) continue;
+      const wt = this.walkerTile(w);
+      let best: Enemy | null = null;
+      let bestD = 2.2;
+      for (const e of this.enemies) {
+        if (!e.sprite.active) continue;
+        const t = this.enemyTile(e);
+        const d = Math.hypot(t.x - wt.x, t.y - wt.y);
+        if (d < bestD) { bestD = d; best = e; }
+      }
+      w.foe = best;
+      if (best) {
+        if (applyDamage(best, soldierDps(1) * 0.5)) this.killEnemy(best);
+        // represalia del incursor
+        w.hp -= best.dmg * 0.5;
+        if (w.hp <= 0) this.killWalker(w);
+      }
+    }
+    // incursores golpean edificios adyacentes
+    for (const e of this.enemies) {
+      if (!e.sprite.active || e.targetPx) continue;
+      if (!e.target) {
+        this.sendEnemy(e);
+        continue;
+      }
+      const t = this.enemyTile(e);
+      const dist = Math.hypot(t.x - e.target.x, t.y - e.target.y);
+      if (dist > 1.6) {
+        this.sendEnemy(e);
+        continue;
+      }
+      e.attackT += 0.5;
+      if (e.attackT < 1.5) continue;
+      e.attackT = 0;
+      const key = `${e.target.x},${e.target.y}`;
+      const rec = this.buildingHp.get(key) ?? { hp: 100, maxHp: 100, bar: this.add.graphics().setDepth(8600) };
+      this.buildingHp.set(key, rec);
+      if (applyDamage(rec, e.dmg)) {
+        this.destroyBuilding(e.target.x, e.target.y);
+      } else {
+        const p = this.placed.find((q) => q.tx === e.target!.x && q.ty === e.target!.y);
+        if (p) {
+          const { x, y } = this.iso(p.tx, p.ty);
+          this.drawBar(rec.bar, x, y - 80, rec.hp / rec.maxHp, 0xfbbf24);
+          this.tweens.add({ targets: p.sprite, x: x + 3, duration: 60, yoyo: true, repeat: 3, onComplete: () => p.sprite.setPosition(x, y) });
+        }
+      }
+    }
+    // limpiar enemigos muertos ya se hace en killEnemy; reasignar objetivos huérfanos
+    for (const w of this.walkers) {
+      if (w.foe && !w.foe.sprite.active) {
+        w.foe = null;
+        if (w.state === 'idle') this.assignJob(w);
+      }
+    }
+  }
+
+  private killEnemy(e: Enemy) {
+    this.tweens.add({ targets: e.sprite, alpha: 0, scale: 0.1, duration: 300, onComplete: () => e.sprite.destroy() });
+    e.shadow.destroy();
+    e.bar.destroy();
+    this.enemies = this.enemies.filter((x) => x !== e);
+    this.kills++;
+    if (this.kills % 2 === 0) {
+      this.stock.oro += 1;
+      this.updateHud();
+    }
+    if (!this.enemies.length) {
+      this.stock.oro += 2;
+      this.updateHud();
+      this.hintText?.setText(`🛡 ¡Oleada ${this.waveNo} rechazada! +2 oro`).setY(44);
+      playSfx('confirm');
+      this.time.delayedCall(4000, () => this.hintText.setText(''));
+    }
+  }
+
+  private killWalker(w: Walker) {
+    this.tweens.add({ targets: w.sprite, alpha: 0, duration: 300, onComplete: () => w.sprite.destroy() });
+    w.shadow.destroy();
+    w.goodsIcon?.destroy();
+    this.walkers = this.walkers.filter((x) => x !== w);
+  }
+
+  private destroyBuilding(tx: number, ty: number) {
+    const i = this.placed.findIndex((p) => p.tx === tx && p.ty === ty);
+    if (i < 0) return;
+    const [p] = this.placed.splice(i, 1);
+    p.sprite.destroy();
+    this.buildingTiles.delete(`${tx},${ty}`);
+    const rec = this.buildingHp.get(`${tx},${ty}`);
+    rec?.bar.destroy();
+    this.buildingHp.delete(`${tx},${ty}`);
+    // trigales huérfanos de una granja caída
+    if (p.id === 'granja') {
+      const { x, y } = this.iso(tx, ty);
+      this.wheatPlots = this.wheatPlots.filter((plot) => {
+        const keep = Math.hypot(plot.sprite.x - x, plot.sprite.y - y) > 160;
+        if (!keep) plot.sprite.destroy();
+        return keep;
+      });
+    }
+    // farol huérfano
+    {
+      const { x, y } = this.iso(tx, ty);
+      this.lanterns = this.lanterns.filter((l) => {
+        const keep = Math.hypot(l.x - x, l.y - y) > 160;
+        if (!keep) l.destroy();
+        return keep;
+      });
+    }
+    // sus defensores buscan otro objetivo
+    for (const e of this.enemies) {
+      if (e.target && e.target.x === tx && e.target.y === ty) this.sendEnemy(e);
+    }
+    this.hintText?.setText(`🔥 ¡${BUILDINGS[p.id].nombre} destruido!`).setY(44);
+    playSfx('error');
+    this.time.delayedCall(4000, () => this.hintText.setText(''));
+    this.updateHud();
+  }
+
+  private recruit(): boolean {
+    const cuartel = this.placed.find((p) => p.id === 'cuartel');
+    if (!cuartel) {
+      this.hintText?.setText('⛔ Necesitas un cuartel').setY(44);
+      return false;
+    }
+    const army = this.walkers.filter((w) => w.kind === 'settler' && (w.role === 'soldier' || w.role === 'archer')).length;
+    if (army >= 12) {
+      this.hintText?.setText('⛔ Ejército al completo (12)').setY(44);
+      return false;
+    }
+    const cost = recruitCost(army);
+    if ((this.stock.espada ?? 0) < cost.espada || (this.stock.pan ?? 0) < cost.pan) {
+      this.hintText?.setText(`⛔ Reclutar cuesta ${cost.espada}⚔ + ${cost.pan}🍞`).setY(44);
+      playSfx('error');
+      return false;
+    }
+    this.stock.espada -= cost.espada;
+    this.stock.pan -= cost.pan;
+    const role = army % 2 === 0 ? 'soldier' : 'archer';
+    const { x, y } = this.iso(cuartel.tx, cuartel.ty);
+    const s = this.add.sprite(x + 30, y - 15, `wl-${role}-e`, 0).setDepth(8000);
+    s.setScale(wlWorkerScale(WL_WORKERS[role]?.dirs.e?.fh ?? 42));
+    s.play(`wl-walk-${role}-e`);
+    const shadow = this.add.image(x + 30, y - 1, 'shadow').setDepth(7999).setAlpha(0.6).setScale(1.2);
+    const w = this.makeWalker(s, shadow, role, 'settler');
+    this.assignJob(w);
+    playSfx('sword');
+    this.updateHud();
+    return true;
   }
 
   /** Cerebro por oficio: encadena ir → trabajar → volver. */
@@ -1358,6 +1675,7 @@ export class GameScene extends Phaser.Scene {
         place: (id: BuildingId) => void;
         stock: () => Stock;
         counts: () => number;
+        recruit: () => boolean;
         inspect: (tx: number, ty: number) => {
           id: BuildingId; nombre: string; descripcion: string; categoria: string;
           receta?: { in: [string, number][]; out: [string, number][] };
@@ -1372,6 +1690,7 @@ export class GameScene extends Phaser.Scene {
       },
       stock: () => ({ ...this.stock }),
       counts: () => this.placed.length,
+      recruit: () => this.recruit(),
       inspect: (tx: number, ty: number) => {
         const p = this.placed.find((q) => q.tx === tx && q.ty === ty);
         if (!p) return null;
@@ -1404,5 +1723,6 @@ export class GameScene extends Phaser.Scene {
     const dt = Math.min(delta, 100) / 1000;
     this.updateWalkers(dt * 1000);
     this.updateShips(dt);
+    this.updateEnemies(dt);
   }
 }
