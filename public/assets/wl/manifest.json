@@ -1,0 +1,427 @@
+{
+  "buildings": {
+    "almacen": {
+      "mode": "sheet",
+      "w": 120,
+      "h": 120,
+      "hotspot": [
+        90,
+        96
+      ],
+      "sheet": {
+        "file": "almacen-idle.png",
+        "fw": 120,
+        "fh": 120,
+        "frames": 20,
+        "fps": 10
+      },
+      "src": "buildings/warehouses/barbarians/headquarters"
+    },
+    "cabanaLenador": {
+      "w": 80,
+      "h": 69,
+      "hotspot": [
+        43,
+        45
+      ],
+      "src": "buildings/productionsites/barbarians/lumberjacks_hut"
+    },
+    "aserradero": {
+      "mode": "sheet",
+      "w": 97,
+      "h": 87,
+      "hotspot": [
+        50,
+        65
+      ],
+      "sheet": {
+        "file": "aserradero-idle.png",
+        "fw": 97,
+        "fh": 87,
+        "frames": 20,
+        "fps": 10
+      },
+      "src": "buildings/productionsites/barbarians/wood_hardener"
+    },
+    "cantera": {
+      "w": 71,
+      "h": 62,
+      "hotspot": [
+        45,
+        48
+      ],
+      "src": "buildings/productionsites/barbarians/quarry"
+    },
+    "residenciaS": {
+      "w": 112,
+      "h": 110,
+      "hotspot": [
+        57,
+        88
+      ],
+      "src": "buildings/productionsites/barbarians/tavern"
+    },
+    "residenciaM": {
+      "w": 112,
+      "h": 110,
+      "hotspot": [
+        57,
+        88
+      ],
+      "src": "buildings/productionsites/barbarians/inn"
+    },
+    "residenciaL": {
+      "w": 112,
+      "h": 110,
+      "hotspot": [
+        57,
+        88
+      ],
+      "src": "buildings/productionsites/barbarians/big_inn"
+    },
+    "granja": {
+      "mode": "sheet",
+      "w": 116,
+      "h": 86,
+      "hotspot": [
+        69,
+        76
+      ],
+      "sheet": {
+        "file": "granja-idle.png",
+        "fw": 116,
+        "fh": 86,
+        "frames": 20,
+        "fps": 10
+      },
+      "src": "buildings/productionsites/barbarians/farm"
+    },
+    "molino": {
+      "w": 120,
+      "h": 101,
+      "hotspot": [
+        57,
+        76
+      ],
+      "src": "buildings/productionsites/barbarians/warmill"
+    },
+    "panaderia": {
+      "w": 100,
+      "h": 78,
+      "hotspot": [
+        41,
+        58
+      ],
+      "src": "buildings/productionsites/barbarians/bakery"
+    },
+    "pozo": {
+      "w": 29,
+      "h": 37,
+      "hotspot": [
+        19,
+        33
+      ],
+      "src": "buildings/productionsites/barbarians/well"
+    },
+    "pesqueria": {
+      "w": 76,
+      "h": 60,
+      "hotspot": [
+        39,
+        52
+      ],
+      "src": "buildings/productionsites/barbarians/fishers_hut"
+    },
+    "minaCarbon": {
+      "w": 64,
+      "h": 51,
+      "hotspot": [
+        21,
+        36
+      ],
+      "src": "buildings/productionsites/barbarians/coalmine"
+    },
+    "minaHierro": {
+      "w": 64,
+      "h": 51,
+      "hotspot": [
+        21,
+        36
+      ],
+      "src": "buildings/productionsites/barbarians/ironmine"
+    },
+    "minaOro": {
+      "w": 64,
+      "h": 51,
+      "hotspot": [
+        21,
+        36
+      ],
+      "src": "buildings/productionsites/barbarians/goldmine"
+    },
+    "fundicion": {
+      "w": 100,
+      "h": 82,
+      "hotspot": [
+        44,
+        58
+      ],
+      "src": "buildings/productionsites/barbarians/smelting_works"
+    },
+    "herreria": {
+      "w": 120,
+      "h": 101,
+      "hotspot": [
+        57,
+        76
+      ],
+      "src": "buildings/productionsites/barbarians/ax_workshop"
+    },
+    "armeria": {
+      "w": 119,
+      "h": 90,
+      "hotspot": [
+        65,
+        83
+      ],
+      "src": "buildings/productionsites/barbarians/helmsmithy"
+    },
+    "cuartel": {
+      "w": 87,
+      "h": 76,
+      "hotspot": [
+        55,
+        49
+      ],
+      "src": "buildings/productionsites/barbarians/barracks"
+    },
+    "torre": {
+      "mode": "sheet",
+      "w": 78,
+      "h": 89,
+      "hotspot": [
+        48,
+        84
+      ],
+      "sheet": {
+        "file": "torre-idle.png",
+        "fw": 78,
+        "fh": 89,
+        "frames": 20,
+        "fps": 10
+      },
+      "src": "buildings/militarysites/barbarians/tower"
+    },
+    "ornamento": {
+      "w": 100,
+      "h": 78,
+      "hotspot": [
+        45,
+        53
+      ],
+      "src": "buildings/productionsites/barbarians/lime_kiln"
+    }
+  },
+  "workers": {
+    "settler": {
+      "worker": "builder",
+      "grid": {
+        "fps": 10,
+        "frames": 10,
+        "columns": 3,
+        "rows": 4
+      },
+      "dirs": {
+        "e": {
+          "file": "settler-e.png",
+          "w": 108,
+          "h": 208,
+          "fw": 36,
+          "fh": 52
+        },
+        "w": {
+          "file": "settler-w.png",
+          "w": 108,
+          "h": 208,
+          "fw": 36,
+          "fh": 52
+        }
+      }
+    },
+    "woodcutter": {
+      "worker": "lumberjack",
+      "grid": {
+        "fps": 10,
+        "frames": 10,
+        "columns": 3,
+        "rows": 4
+      },
+      "dirs": {
+        "e": {
+          "file": "woodcutter-e.png",
+          "w": 108,
+          "h": 180,
+          "fw": 36,
+          "fh": 45
+        },
+        "w": {
+          "file": "woodcutter-w.png",
+          "w": 108,
+          "h": 180,
+          "fw": 36,
+          "fh": 45
+        }
+      }
+    },
+    "carrier": {
+      "worker": "carrier",
+      "grid": {
+        "fps": 10,
+        "frames": 10,
+        "columns": 3,
+        "rows": 4
+      },
+      "dirs": {
+        "e": {
+          "file": "carrier-e.png",
+          "w": 75,
+          "h": 168,
+          "fw": 25,
+          "fh": 42
+        },
+        "w": {
+          "file": "carrier-w.png",
+          "w": 75,
+          "h": 168,
+          "fw": 25,
+          "fh": 42
+        }
+      }
+    },
+    "soldier": {
+      "worker": "soldier",
+      "grid": {
+        "fps": 10,
+        "frames": 10,
+        "columns": 3,
+        "rows": 4
+      },
+      "dirs": {
+        "e": {
+          "file": "soldier-e.png",
+          "w": 99,
+          "h": 140,
+          "fw": 33,
+          "fh": 35
+        },
+        "w": {
+          "file": "soldier-w.png",
+          "w": 99,
+          "h": 140,
+          "fw": 33,
+          "fh": 35
+        }
+      }
+    },
+    "archer": {
+      "worker": "hunter",
+      "grid": {
+        "fps": 10,
+        "frames": 10,
+        "columns": 3,
+        "rows": 4
+      },
+      "dirs": {
+        "e": {
+          "file": "archer-e.png",
+          "w": 90,
+          "h": 252,
+          "fw": 30,
+          "fh": 63
+        },
+        "w": {
+          "file": "archer-w.png",
+          "w": 90,
+          "h": 252,
+          "fw": 30,
+          "fh": 63
+        }
+      }
+    },
+    "miner": {
+      "worker": "miner",
+      "grid": {
+        "fps": 10,
+        "frames": 10,
+        "columns": 3,
+        "rows": 4
+      },
+      "dirs": {
+        "e": {
+          "file": "miner-e.png",
+          "w": 138,
+          "h": 228,
+          "fw": 46,
+          "fh": 57
+        },
+        "w": {
+          "file": "miner-w.png",
+          "w": 138,
+          "h": 228,
+          "fw": 46,
+          "fh": 57
+        }
+      }
+    },
+    "fisher": {
+      "worker": "fisher",
+      "grid": {
+        "fps": 10,
+        "frames": 10,
+        "columns": 3,
+        "rows": 4
+      },
+      "dirs": {
+        "e": {
+          "file": "fisher-e.png",
+          "w": 126,
+          "h": 296,
+          "fw": 42,
+          "fh": 74
+        },
+        "w": {
+          "file": "fisher-w.png",
+          "w": 126,
+          "h": 296,
+          "fw": 42,
+          "fh": 74
+        }
+      }
+    },
+    "baker": {
+      "worker": "baker",
+      "grid": {
+        "fps": 10,
+        "frames": 10,
+        "columns": 3,
+        "rows": 4
+      },
+      "dirs": {
+        "e": {
+          "file": "baker-e.png",
+          "w": 87,
+          "h": 204,
+          "fw": 29,
+          "fh": 51
+        },
+        "w": {
+          "file": "baker-w.png",
+          "w": 87,
+          "h": 204,
+          "fw": 29,
+          "fh": 51
+        }
+      }
+    }
+  }
+}

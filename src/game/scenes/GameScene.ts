@@ -1,32 +1,30 @@
 import Phaser from 'phaser';
+import { playSfx } from '../audio';
 import { BUILDINGS, INITIAL_STOCK, type BuildingId, type ResourceId } from '../data/buildings';
+import { WL_BUILDINGS, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
 import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
 import { tickJob, type ProductionJob, type Stock } from '../systems/economy';
 
-// Fase 1: el suelo viene de Tiled (public/assets/maps/isla-01.json) con el
-// tileset Kenney CC0 (public/assets/terrain-sheet.png). Este archivo ya NO
-// dibuja tiles: solo decora, coloca edificios y simula.
-const MAP = ISLAND_SIZE;
-
-const BUILD_TEX: Record<BuildingId, string> = {
-  almacen: 'b-almacen', cabanaLenador: 'b-cabanaLenador', aserradero: 'b-aserradero',
-  cantera: 'b-cantera', residenciaS: 'b-residenciaS', residenciaM: 'b-residenciaM',
-  residenciaL: 'b-residenciaL', granja: 'b-granja', molino: 'b-molino',
-  panaderia: 'b-panaderia', pozo: 'b-pozo', pesqueria: 'b-pesqueria',
-  minaCarbon: 'b-minaCarbon', minaHierro: 'b-minaHierro', minaOro: 'b-minaOro',
-  fundicion: 'b-fundicion', herreria: 'b-herreria', armeria: 'b-armeria',
-  cuartel: 'b-cuartel', torre: 'b-torre', ornamento: 'b-ornamento',
+// Rama B: arte GPL de Widelands (ver docs/ATRIBUCION.md + wlArt.ts).
+const WL_TEX: Record<BuildingId, string> = {
+  almacen: 'wl-b-almacen', cabanaLenador: 'wl-b-cabanaLenador', aserradero: 'wl-b-aserradero',
+  cantera: 'wl-b-cantera', residenciaS: 'wl-b-residenciaS', residenciaM: 'wl-b-residenciaM',
+  residenciaL: 'wl-b-residenciaL', granja: 'wl-b-granja', molino: 'wl-b-molino',
+  panaderia: 'wl-b-panaderia', pozo: 'wl-b-pozo', pesqueria: 'wl-b-pesqueria',
+  minaCarbon: 'wl-b-minaCarbon', minaHierro: 'wl-b-minaHierro', minaOro: 'wl-b-minaOro',
+  fundicion: 'wl-b-fundicion', herreria: 'wl-b-herreria', armeria: 'wl-b-armeria',
+  cuartel: 'wl-b-cuartel', torre: 'wl-b-torre', ornamento: 'wl-b-ornamento',
 };
 
-const SMOKERS: Set<BuildingId> = new Set(['herreria', 'fundicion', 'panaderia', 'minaHierro', 'minaCarbon', 'cabanaLenador', 'residenciaM', 'residenciaL']);
-const GLOWERS: Set<BuildingId> = new Set(['fundicion', 'herreria', 'minaCarbon', 'minaHierro', 'minaOro', 'panaderia']);
+const WL_SMOKE: Set<BuildingId> = new Set(['fundicion', 'herreria', 'panaderia', 'minaCarbon', 'minaHierro', 'minaOro', 'cabanaLenador']);
+const MAP = ISLAND_SIZE;
 
 interface Placed { id: BuildingId; tx: number; ty: number; sprite: Phaser.GameObjects.Container; done: number; total: number }
 
 export class GameScene extends Phaser.Scene {
   stock: Stock = { ...INITIAL_STOCK };
   placed: Placed[] = [];
-  settlers: Phaser.GameObjects.Image[] = [];
+  settlers: Phaser.GameObjects.Sprite[] = [];
   pendingBuild: BuildingId | null = null;
   territoryRadius = 7;
   center = { x: MAP / 2, y: MAP / 2 };
@@ -46,15 +44,59 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.tilemapTiledJSON('isla-01', 'assets/maps/isla-01.json');
-    this.load.image('terreno', 'assets/terrain-sheet.png');
-    this.load.image('foam-ne', 'assets/foam-ne.png');
-    this.load.image('foam-se', 'assets/foam-se.png');
-    this.load.image('foam-sw', 'assets/foam-sw.png');
-    this.load.image('foam-nw', 'assets/foam-nw.png');
+    this.load.tilemapTiledJSON('isla-01', '/assets/maps/isla-01.json');
+    this.load.image('terreno', '/assets/terrain-sheet.png');
+    this.load.image('foam-ne', '/assets/foam-ne.png');
+    this.load.image('foam-se', '/assets/foam-se.png');
+    this.load.image('foam-sw', '/assets/foam-sw.png');
+    this.load.image('foam-nw', '/assets/foam-nw.png');
+    for (const id of Object.keys(WL_TEX)) {
+      const art = WL_BUILDINGS[id];
+      if (!art) continue;
+      this.load.image(WL_TEX[id as BuildingId], `/assets/wl/b-${id}.png`);
+      if (art.mode === 'sheet' && art.sheet) {
+        this.load.spritesheet(`wl-sheet-${id}`, `/assets/wl/sheets/${art.sheet.file}`, {
+          frameWidth: art.sheet.fw, frameHeight: art.sheet.fh,
+        });
+      }
+    }
+    for (const [role, w] of Object.entries(WL_WORKERS)) {
+      for (const [dir, d] of Object.entries(w.dirs)) {
+        this.load.spritesheet(`wl-${role}-${dir}`, `/assets/wl/people/${d.file}`, {
+          frameWidth: d.fw, frameHeight: d.fh,
+        });
+      }
+    }
+  }
+
+  private createWlAnims() {
+    for (const [id, art] of Object.entries(WL_BUILDINGS)) {
+      if (art.mode !== 'sheet' || !art.sheet || this.anims.exists(`wl-b-${id}`)) continue;
+      const total = art.sheet.fw && art.sheet.fh ? 24 : art.sheet.frames;
+      this.anims.create({
+        key: `wl-b-${id}`,
+        frames: this.anims.generateFrameNumbers(`wl-sheet-${id}`, { start: 0, end: Math.min(art.sheet.frames, total) - 1 }),
+        frameRate: art.sheet.fps,
+        repeat: -1,
+      });
+    }
+    for (const [role, w] of Object.entries(WL_WORKERS)) {
+      for (const dir of Object.keys(w.dirs)) {
+        const key = `wl-walk-${role}-${dir}`;
+        if (this.anims.exists(key)) continue;
+        const total = w.grid.columns * w.grid.rows;
+        this.anims.create({
+          key,
+          frames: this.anims.generateFrameNumbers(`wl-${role}-${dir}`, { start: 0, end: Math.min(w.grid.frames, total) - 1 }),
+          frameRate: w.grid.fps,
+          repeat: -1,
+        });
+      }
+    }
   }
 
   create() {
+    this.createWlAnims();
     this.buildTilemap();
     this.setupCamera();
     this.setupInput();
@@ -250,14 +292,17 @@ export class GameScene extends Phaser.Scene {
     const tx = Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-5, 5)), 3, MAP - 4);
     const ty = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-5, 5)), 3, MAP - 4);
     const { x, y } = this.iso(tx, ty);
-    const s = this.add.image(x, y - 15, tex).setDepth(8000);
+    const s = this.add.sprite(x, y - 15, `wl-${tex}-e`, 0).setDepth(8000);
     s.setData('role', tex);
-    s.setScale(1.8);
+    s.setData('dir', 'e');
+    const fh = WL_WORKERS[tex]?.dirs.e?.fh ?? 42;
+    s.setScale(wlWorkerScale(fh));
+    s.play(`wl-walk-${tex}-e`);
     this.settlers.push(s);
     this.wanderRole(s);
   }
 
-  private wanderRole(s: Phaser.GameObjects.Image) {
+  private wanderRole(s: Phaser.GameObjects.Sprite) {
     if (!s.active) return;
     const role = s.getData('role') as string;
     let tx = Phaser.Math.Between(3, MAP - 4);
@@ -287,10 +332,14 @@ export class GameScene extends Phaser.Scene {
       ty = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-6, 6)), 2, MAP - 3);
     }
     const { x, y } = this.iso(tx, ty);
-    s.setFlipX(x < s.x);
+    // dirección este/oeste según el destino (los sheets son direccionales)
+    const dir = x >= s.x ? 'e' : 'w';
+    if (WL_WORKERS[role]?.dirs[dir as 'e' | 'w']) {
+      s.setTexture(`wl-${role}-${dir}`);
+      s.play(`wl-walk-${role}-${dir}`);
+    }
     s.setDepth(7500 + ty * 2);
     this.tweens.add({ targets: s, x, y: y - 15, duration: Phaser.Math.Between(2200, 5200), ease: 'Sine.easeInOut', onComplete: () => this.wanderRole(s) });
-    this.tweens.add({ targets: s, scaleY: 1.7, duration: 260, yoyo: true, repeat: 7 });
   }
 
   /** Coloca lo que el diseñador marcó en Tiled (capa Logica). */
@@ -304,11 +353,12 @@ export class GameScene extends Phaser.Scene {
       const edificio = o.properties?.find((p: { name: string }) => p.name === 'edificio')?.value as BuildingId | undefined;
       const oficio = o.properties?.find((p: { name: string }) => p.name === 'oficio')?.value as string | undefined;
       if (edificio && BUILDINGS[edificio]) this.tryPlace(edificio, t.x, t.y, true);
-      else if (oficio) {
+      else if (oficio && WL_WORKERS[oficio]) {
         const { x, y } = this.iso(t.x, t.y);
-        const s = this.add.image(x, y - 15, oficio).setDepth(8000);
+        const s = this.add.sprite(x, y - 15, `wl-${oficio}-e`, 0).setDepth(8000);
         s.setData('role', oficio);
-        s.setScale(1.8);
+        s.setScale(wlWorkerScale(WL_WORKERS[oficio].dirs.e?.fh ?? 42));
+        s.play(`wl-walk-${oficio}-e`);
         this.settlers.push(s);
         this.wanderRole(s);
       }
@@ -341,54 +391,61 @@ export class GameScene extends Phaser.Scene {
 
   tryPlace(id: BuildingId, tx: number, ty: number, free: boolean): boolean {
     const def = BUILDINGS[id];
+    const art = WL_BUILDINGS[id];
+    if (!art) return false;
     if (!free) {
       const ok = (Object.entries(def.coste) as [ResourceId, number][]).every(([k, v]) => this.stock[k] >= v);
       if (!ok) {
         this.hintText.setText(`⛔ Faltan recursos para ${def.nombre}`).setY(44);
+        playSfx('error');
         this.time.delayedCall(1500, () => this.hintText.setText(''));
         return false;
       }
       for (const [k, v] of Object.entries(def.coste) as [ResourceId, number][]) this.stock[k] -= v;
+      playSfx('confirm');
     }
+    const scale = wlBuildingScale(art.w, art.h);
     const { x, y } = this.iso(tx, ty);
     const depth = 6000 + ty * 4;
     const parts: Phaser.GameObjects.GameObject[] = [];
-    parts.push(this.add.image(0, -2, 'shadow').setAlpha(0.75).setScale(1.8));
+    parts.push(this.add.image(0, -2, 'shadow').setAlpha(0.75).setScale(3.0));
     this.surroundings(id, x, y, depth, parts);
-    const img = this.add.image(0, -34, BUILD_TEX[id]).setOrigin(0.5, 1).setScale(1.7);
+    // ancla por hotspot oficial de Widelands
+    const ox = art.hotspot[0] / art.w;
+    const oy = art.hotspot[1] / art.h;
+    let img: Phaser.GameObjects.Image | Phaser.GameObjects.Sprite;
+    if (art.mode === 'sheet') {
+      const sp = this.add.sprite(0, 0, `wl-sheet-${id}`, 0).setOrigin(ox, oy).setScale(scale);
+      sp.play(`wl-b-${id}`);
+      img = sp;
+    } else {
+      img = this.add.image(0, 0, WL_TEX[id]).setOrigin(ox, oy).setScale(scale);
+    }
     parts.push(img);
-    const name = this.add.text(0, 3, def.nombre, { fontSize: '9px', color: '#fff', backgroundColor: '#00000077', padding: { x: 4, y: 2 } }).setOrigin(0.5);
+    const name = this.add.text(0, 10, def.nombre, { fontSize: '9px', color: '#fff', backgroundColor: '#00000077', padding: { x: 4, y: 2 } }).setOrigin(0.5);
     parts.push(name);
     const c = this.add.container(x, y, parts).setDepth(depth);
-    if (id === 'molino') {
-      const blades = this.add.image(58, -150, 'mill-blades').setScale(1);
-      c.add(blades);
-      this.tweens.add({ targets: blades, angle: 360, duration: 5200, repeat: -1 });
-    }
-    if (GLOWERS.has(id)) {
-      const glow = this.add.image(0, -52, 'glow').setAlpha(0.5).setScale(2.2);
-      c.add(glow);
-      this.tweens.add({ targets: glow, alpha: 0.2, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    }
-    const scaffold = this.add.image(0, -34, 'scaffold').setOrigin(0.5, 1).setAlpha(0.95).setScale(1.7);
+    const scaffold = this.add.image(0, -44, 'scaffold').setOrigin(0.5, 1).setAlpha(0.95).setScale(1.3);
     c.add(scaffold);
     img.setAlpha(0.45);
-    const worker = this.add.image(44, -12, 'carrier').setScale(1.8);
+    const worker = this.add.image(30, -12, 'wl-carrier-e', 4).setScale(wlWorkerScale(42));
     c.add(worker);
     this.tweens.add({ targets: worker, y: -16, duration: 380, yoyo: true, repeat: 8 });
     this.drawPath(x, y, depth - 1);
     this.tweens.add({
       targets: [scaffold], alpha: 0, duration: Math.min(def.tiempoConstruccionMs, 4000),
-      onComplete: () => { scaffold.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, 1.7); },
+      onComplete: () => { scaffold.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, scale); },
     });
     this.placed.push({ id, tx, ty, sprite: c, done: 0, total: def.tiempoConstruccionMs });
-    if (SMOKERS.has(id)) this.addSmoke(x, y - 150, depth + 1);
+    if (WL_SMOKE.has(id)) this.addSmoke(x, y - art.h * scale * 0.85, depth + 1);
     if (id === 'torre') this.territoryRadius += 1.5;
     if (id === 'cuartel') {
+      if (!free) playSfx('sword');
       for (const t of ['soldier', 'archer']) {
-        const s = this.add.image(x + 44, y - 15, t).setDepth(8000);
+        const s = this.add.sprite(x + 30, y - 15, `wl-${t}-e`, 0).setDepth(8000);
         s.setData('role', t);
-        s.setScale(1.8);
+        s.setScale(wlWorkerScale(WL_WORKERS[t]?.dirs.e?.fh ?? 42));
+        s.play(`wl-walk-${t}-e`);
         this.settlers.push(s);
         this.wanderRole(s);
       }
@@ -397,13 +454,13 @@ export class GameScene extends Phaser.Scene {
     return true;
   }
 
-  private popIn(img: Phaser.GameObjects.Image, base: number) {
+  private popIn(img: Phaser.GameObjects.Image | Phaser.GameObjects.Sprite, base: number) {
     img.setScale(base * 0.85);
     this.tweens.add({ targets: img, scale: base, duration: 300, ease: 'Back.easeOut' });
   }
 
   private surroundings(id: BuildingId, x: number, y: number, depth: number, parts: Phaser.GameObjects.GameObject[]) {
-    const add = (tex: string, dx: number, dy: number, s = 1.7, alpha = 1) => {
+    const add = (tex: string, dx: number, dy: number, s = 1.0, alpha = 1) => {
       const p = this.add.image(dx, dy, tex).setScale(s).setAlpha(alpha);
       parts.push(p);
     };
@@ -415,12 +472,11 @@ export class GameScene extends Phaser.Scene {
       case 'residenciaS': case 'residenciaM': case 'residenciaL':
         add('fence', -62, -2); add('flowers', 52, 0); break;
       case 'granja':
-        add('fence', -68, -2); add('fence', 68, -2);
-        add('field', 0, 44, 1.7, 0.95); break;
+        add('fence', -68, -2); add('fence', 68, -2); break;
       case 'pozo': add('flowers', -44, 0); break;
       case 'fundicion': case 'herreria': add('crates', 62, -4); break;
       case 'cuartel': case 'armeria': add('fence', -64, -2); add('fence', 64, -2); break;
-      case 'torre': add('stones', 52, -2, 1.4); break;
+      case 'torre': add('stones', 52, -2, 0.8); break;
       case 'ornamento': add('flowers', -58, 0); add('flowers', 58, 0); add('tuft', -38, 2); add('tuft', 38, 2); break;
       default: break;
     }
@@ -433,7 +489,7 @@ export class GameScene extends Phaser.Scene {
     for (let i = 1; i < steps; i++) {
       const px = a.x + ((x - a.x) * i) / steps + Phaser.Math.Between(-14, 14);
       const py = a.y + ((y - a.y) * i) / steps + Phaser.Math.Between(-8, 8);
-      this.add.image(px, py + 8, 'pathdot').setDepth(depth).setAlpha(0.5).setScale(1.8);
+      this.add.image(px, py + 8, 'pathdot').setDepth(depth).setAlpha(0.5).setScale(1.2);
     }
   }
 

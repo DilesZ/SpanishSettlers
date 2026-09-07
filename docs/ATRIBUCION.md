@@ -25,6 +25,20 @@ posterior**. Consecuencias aceptadas por el titular del repositorio:
   abajo; ante la duda, rige GPL-2.0+.
 * Edificios/trabajadores usados (tribu bárbara; se completará en Fase 2B):
   *pendiente de tabla de equivalencias.*
+* **Fase 2B aplicada**: `scripts/import-widelands.mjs` importa 21 edificios
+  (idle animado o estático + hotspot + `menu.png` como icono HUD) y 8 workers
+  (sheets `walk_e/w` direccionales) a `public/assets/wl/` + manifest
+  `src/game/data/wlArt.ts`. Tabla:
+  almacen→warehouses/headquarters · cabanaLenador→lumberjacks_hut ·
+  aserradero→wood_hardener · cantera→quarry · residenciaS→tavern ·
+  residenciaM→inn · residenciaL→big_inn · granja→farm · molino→warmill ·
+  panaderia→bakery · pozo→well · pesqueria→fishers_hut · minaCarbon→coalmine ·
+  minaHierro→ironmine · minaOro→goldmine · fundicion→smelting_works ·
+  herreria→ax_workshop · armeria→helmsmithy · cuartel→barracks ·
+  torre→militarysites/tower · ornamento→lime_kiln (excepción: sin equivalente,
+  horno de cal como monumento).
+  Workers: settler→builder · woodcutter→lumberjack · carrier→carrier ·
+  soldier→soldier · archer→hunter · miner→miner · fisher→fisher · baker→baker.
 
 ## Material CC0 (compatible con GPL, se cita por cortesía)
 
