@@ -1,13 +1,12 @@
 import Phaser from 'phaser';
 import { BUILDINGS, INITIAL_STOCK, type BuildingId, type ResourceId } from '../data/buildings';
+import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
 import { tickJob, type ProductionJob, type Stock } from '../systems/economy';
 
-export const TILE_W = 64;
-export const TILE_H = 32;
-const MAP = 28;
-
-type Terrain = 'grass' | 'sand' | 'water' | 'forest' | 'mountain';
-interface Placed { id: BuildingId; tx: number; ty: number; sprite: Phaser.GameObjects.Container; done: number; total: number }
+// Fase 1: el suelo viene de Tiled (public/assets/maps/isla-01.json) con el
+// tileset Kenney CC0 (public/assets/terrain-sheet.png). Este archivo ya NO
+// dibuja tiles: solo decora, coloca edificios y simula.
+const MAP = ISLAND_SIZE;
 
 const BUILD_TEX: Record<BuildingId, string> = {
   almacen: 'b-almacen', cabanaLenador: 'b-cabanaLenador', aserradero: 'b-aserradero',
@@ -22,11 +21,7 @@ const BUILD_TEX: Record<BuildingId, string> = {
 const SMOKERS: Set<BuildingId> = new Set(['herreria', 'fundicion', 'panaderia', 'minaHierro', 'minaCarbon', 'cabanaLenador', 'residenciaM', 'residenciaL']);
 const GLOWERS: Set<BuildingId> = new Set(['fundicion', 'herreria', 'minaCarbon', 'minaHierro', 'minaOro', 'panaderia']);
 
-function hash(x: number, y: number): number {
-  let h = x * 374761393 + y * 668265263;
-  h = (h ^ (h >> 13)) * 1274126177;
-  return ((h ^ (h >> 16)) >>> 0) / 4294967295;
-}
+interface Placed { id: BuildingId; tx: number; ty: number; sprite: Phaser.GameObjects.Container; done: number; total: number }
 
 export class GameScene extends Phaser.Scene {
   stock: Stock = { ...INITIAL_STOCK };
@@ -38,21 +33,29 @@ export class GameScene extends Phaser.Scene {
   jobs: ProductionJob[] = [];
   private hudText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
-  private waterTiles: Phaser.GameObjects.Image[] = [];
+  private groundLayer!: Phaser.Tilemaps.TilemapLayer;
+  private waterCells: { x: number; y: number; alt: boolean }[] = [];
   private forestTiles: { x: number; y: number }[] = [];
   private shoreTiles: { x: number; y: number }[] = [];
   private hillTiles: { x: number; y: number }[] = [];
+  private hoverMarker!: Phaser.GameObjects.Graphics;
   private minimap?: Phaser.Cameras.Scene2D.Camera;
 
   constructor() {
     super('game');
   }
 
+  preload() {
+    this.load.tilemapTiledJSON('isla-01', 'assets/maps/isla-01.json');
+    this.load.image('terreno', 'assets/terrain-sheet.png');
+  }
+
   create() {
-    this.generateMap();
+    this.buildTilemap();
     this.setupCamera();
     this.setupInput();
-    this.placeInitial();
+    this.placeFromLogicLayer();
+    this.placeExtraInitial();
     this.spawnPopulation();
     this.setupAmbient();
     this.exposeBridge();
@@ -65,98 +68,111 @@ export class GameScene extends Phaser.Scene {
     return { x: (tx - ty) * (TILE_W / 2), y: (tx + ty) * (TILE_H / 2) };
   }
 
-  private terrainAt(tx: number, ty: number): Terrain {
-    const d = Math.hypot(tx - MAP / 2, ty - MAP / 2);
-    const n = hash(tx, ty);
-    if (d > 12.5) return 'water';
-    if (d > 11.2) return 'sand';
-    if (n > 0.9) return 'mountain';
-    if (n > 0.72) return 'forest';
-    return 'grass';
-  }
+  private buildTilemap() {
+    const map = this.make.tilemap({ key: 'isla-01' });
+    const tileset = map.addTilesetImage('terreno', 'terreno');
+    if (!tileset) throw new Error('Tileset terreno no encontrado en isla-01.json');
+    const layer = map.createLayer('Suelo', tileset, 0, 0);
+    if (!layer) throw new Error('Capa Suelo no encontrada en isla-01.json');
+    layer.setDepth(0);
+    this.groundLayer = layer;
 
-  private grassKey(tx: number, ty: number): string {
-    const n = hash(tx * 3 + 11, ty * 7 + 5);
-    return n > 0.66 ? 'grass0' : n > 0.33 ? 'grass1' : 'grass2';
-  }
-
-  private generateMap() {
     for (let ty = 0; ty < MAP; ty++) {
       for (let tx = 0; tx < MAP; tx++) {
-        const t = this.terrainAt(tx, ty);
+        const t = terrainAt(tx, ty);
         const { x, y } = this.iso(tx, ty);
-        let key = this.grassKey(tx, ty);
-        if (t === 'water') key = hash(tx, ty * 2) > 0.5 ? 'water' : 'water2';
-        else if (t === 'sand') key = 'sand';
-        else if (t === 'forest') key = 'forest';
-        else if (t === 'mountain') key = 'mountain';
-        const img = this.add.image(x, y, key).setDepth(ty * MAP + tx);
-        img.setInteractive({ useHandCursor: true });
-        img.on('pointerdown', () => this.onTileClicked(tx, ty));
-        img.on('pointerover', () => img.setTint(0xfff2cc));
-        img.on('pointerout', () => img.clearTint());
-        if (t === 'water') this.waterTiles.push(img);
+        if (t === 'water' || t === 'waterB' || t === 'waterC') this.waterCells.push({ x: tx, y: ty, alt: false });
         if (t === 'forest') this.forestTiles.push({ x: tx, y: ty });
         if (t === 'mountain') this.hillTiles.push({ x: tx, y: ty });
         if (t === 'sand') this.shoreTiles.push({ x: tx, y: ty });
         this.decorate(tx, ty, t, x, y);
       }
     }
+    // marcador hover (diamante)
+    this.hoverMarker = this.add.graphics().setDepth(9400);
+    this.hoverMarker.lineStyle(2, 0xfde68a, 0.9);
+    this.hoverMarker.beginPath();
+    this.hoverMarker.moveTo(0, -TILE_H / 2);
+    this.hoverMarker.lineTo(TILE_W / 2, 0);
+    this.hoverMarker.lineTo(0, TILE_H / 2);
+    this.hoverMarker.lineTo(-TILE_W / 2, 0);
+    this.hoverMarker.closePath();
+    this.hoverMarker.strokePath();
+    this.hoverMarker.setVisible(false);
+
     const c = this.iso(this.center.x, this.center.y);
-    this.add.circle(c.x, c.y - 8, this.territoryRadius * 34, 0xfbbf24, 0.07).setDepth(9400).setStrokeStyle(2, 0xfbbf24, 0.45);
+    this.add.circle(c.x, c.y - 8, this.territoryRadius * 68, 0xfbbf24, 0.07).setDepth(9390).setStrokeStyle(2, 0xfbbf24, 0.45);
   }
 
-  private decorate(tx: number, ty: number, t: Terrain, x: number, y: number) {
-    const depth = ty * MAP + tx + 0.5;
-    const n = hash(tx * 13 + 7, ty * 29 + 3);
+  private decorate(tx: number, ty: number, t: string, x: number, y: number) {
+    const depth = 100 + ty * MAP + tx + 0.5;
+    // hash local para variar (misma función que island.ts)
+    let h = (tx * 374761393 + ty * 668265263) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    const n = ((h ^ (h >>> 16)) >>> 0) / 4294967295;
     if (t === 'forest' && n > 0.22) {
-      const tree = this.add.image(x + Phaser.Math.Between(-10, 10), y - 14, n > 0.55 ? 'pine' : 'oak').setDepth(depth);
-      tree.setScale(0.85 + n * 0.45);
+      const tree = this.add.image(x + Phaser.Math.Between(-20, 20), y - 28, n > 0.55 ? 'pine' : 'oak').setDepth(depth);
+      tree.setScale(1.5 + n * 0.7);
       this.tweens.add({ targets: tree, angle: 1.1, duration: 2400 + n * 1600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     } else if (t === 'mountain' && n > 0.35) {
-      this.add.image(x, y - 9, 'rock').setDepth(depth).setScale(0.85 + n * 0.55);
-    } else if (t === 'grass') {
-      if (n > 0.88) this.add.image(x + 8, y + 2, 'flowers').setDepth(depth).setAlpha(0.95);
-      else if (n > 0.72) this.add.image(x - 10, y + 3, 'tuft').setDepth(depth).setAlpha(0.9);
-    } else if (t === 'sand') {
-      if (n > 0.55) this.add.image(x, y - 12, 'palm').setDepth(depth).setScale(0.9 + n * 0.25);
-      else if (n > 0.85) this.add.image(x - 6, y, 'rock').setDepth(depth).setScale(0.45).setAlpha(0.8);
+      this.add.image(x, y - 18, 'rock').setDepth(depth).setScale(1.6 + n);
+    } else if ((t === 'grass' || t === 'grassB' || t === 'grassC') && n > 0.86) {
+      this.add.image(x + 16, y + 4, 'flowers').setDepth(depth).setAlpha(0.95).setScale(1.6);
+    } else if (t === 'sand' && n > 0.55) {
+      this.add.image(x, y - 24, 'palm').setDepth(depth).setScale(1.7 + n * 0.5);
     }
   }
 
   private animateWater() {
-    for (const w of this.waterTiles) {
-      if (!w.active) continue;
-      w.setTexture(w.texture.key === 'water' ? 'water2' : 'water');
+    if (!this.groundLayer) return;
+    for (const w of this.waterCells) {
+      if ((w.x + w.y) % 2 === 0) continue; // solo la mitad: parpadeo sutil
+      const tile = this.groundLayer.getTileAt(w.x, w.y);
+      if (!tile) continue;
+      w.alt = !w.alt;
+      // gid 6 (water) <-> 7 (waterB)
+      this.groundLayer.putTileAt(w.alt ? 7 : 6, w.x, w.y);
     }
   }
 
   private setupCamera() {
     const cam = this.cameras.main;
-    cam.setZoom(1);
-    cam.centerOn(0, 200);
+    cam.setZoom(0.75);
+    cam.centerOn(0, 450);
     this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
-      cam.setZoom(Phaser.Math.Clamp(cam.zoom * (dy > 0 ? 0.9 : 1.1), 0.4, 2.5));
+      cam.setZoom(Phaser.Math.Clamp(cam.zoom * (dy > 0 ? 0.9 : 1.1), 0.3, 2));
     });
     let dragging = false;
     let last = { x: 0, y: 0 };
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (p.rightButtonDown() || p.middleButtonDown()) { dragging = true; last = { x: p.x, y: p.y }; }
+      else if (p.leftButtonDown()) {
+        const wx = p.worldX;
+        const wy = p.worldY;
+        const t = this.groundLayer.worldToTileXY(wx, wy);
+        if (t && t.x >= 0 && t.y >= 0 && t.x < MAP && t.y < MAP) this.onTileClicked(t.x, t.y);
+      }
     });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
       if (dragging && p.isDown) { cam.scrollX -= (p.x - last.x) / cam.zoom; cam.scrollY -= (p.y - last.y) / cam.zoom; last = { x: p.x, y: p.y }; }
+      if (!p.isDown) {
+        const t = this.groundLayer.worldToTileXY(p.worldX, p.worldY);
+        if (t && t.x >= 0 && t.y >= 0 && t.x < MAP && t.y < MAP) {
+          const { x, y } = this.iso(t.x, t.y);
+          this.hoverMarker.setPosition(x, y).setVisible(true);
+        } else this.hoverMarker.setVisible(false);
+      }
     });
     this.input.on('pointerup', () => { dragging = false; });
     this.input.mouse?.disableContextMenu();
-    this.cameras.main.setBounds(-1200, -400, 2400, 1700);
+    this.cameras.main.setBounds(-2200, -600, 4400, 3200);
 
     this.hudText = this.add.text(12, 10, '', { fontSize: '12px', color: '#fff', backgroundColor: '#00000099', padding: { x: 8, y: 6 } })
       .setScrollFactor(0).setDepth(9950);
     this.hintText = this.add.text(12, 0, '', { fontSize: '12px', color: '#fde68a', backgroundColor: '#00000099', padding: { x: 8, y: 6 } })
       .setScrollFactor(0).setDepth(9950);
 
-    // Minimapa: segunda cámara cenital en la esquina
-    this.minimap = this.cameras.add(0, 0, 190, 140).setZoom(0.11).centerOn(0, 200);
+    this.minimap = this.cameras.add(0, 0, 190, 140).setZoom(0.055).centerOn(0, 450);
     this.minimap.setBackgroundColor('#0d1f16');
     this.layoutMinimap();
   }
@@ -206,6 +222,7 @@ export class GameScene extends Phaser.Scene {
     const { x, y } = this.iso(tx, ty);
     const s = this.add.image(x, y - 15, tex).setDepth(8000);
     s.setData('role', tex);
+    s.setScale(1.8);
     this.settlers.push(s);
     this.wanderRole(s);
   }
@@ -215,8 +232,6 @@ export class GameScene extends Phaser.Scene {
     const role = s.getData('role') as string;
     let tx = Phaser.Math.Between(3, MAP - 4);
     let ty = Phaser.Math.Between(3, MAP - 4);
-    // Los oficios frecuentan su zona: leñador→bosque, minero→colina, pescador→orilla,
-    // portador→lanzadera almacén↔edificios, soldado→patrulla, resto→centro.
     if (role === 'woodcutter' && this.forestTiles.length) {
       const c = this.pickTile(this.forestTiles, this.center.x, this.center.y, 11);
       tx = c.x; ty = c.y;
@@ -245,13 +260,32 @@ export class GameScene extends Phaser.Scene {
     s.setFlipX(x < s.x);
     s.setDepth(7500 + ty * 2);
     this.tweens.add({ targets: s, x, y: y - 15, duration: Phaser.Math.Between(2200, 5200), ease: 'Sine.easeInOut', onComplete: () => this.wanderRole(s) });
-    this.tweens.add({ targets: s, scaleY: 0.93, duration: 260, yoyo: true, repeat: 7 });
+    this.tweens.add({ targets: s, scaleY: 1.7, duration: 260, yoyo: true, repeat: 7 });
   }
 
-  private placeInitial() {
-    this.tryPlace('almacen', this.center.x, this.center.y, true);
-    this.tryPlace('cabanaLenador', this.center.x - 3, this.center.y - 1, true);
-    this.tryPlace('aserradero', this.center.x - 4, this.center.y + 2, true);
+  /** Coloca lo que el diseñador marcó en Tiled (capa Logica). */
+  private placeFromLogicLayer() {
+    const map = this.make.tilemap({ key: 'isla-01' });
+    const layer = map.getObjectLayer('Logica');
+    if (!layer) return;
+    for (const o of layer.objects) {
+      const t = this.groundLayer.worldToTileXY(o.x ?? 0, o.y ?? 0);
+      if (!t) continue;
+      const edificio = o.properties?.find((p: { name: string }) => p.name === 'edificio')?.value as BuildingId | undefined;
+      const oficio = o.properties?.find((p: { name: string }) => p.name === 'oficio')?.value as string | undefined;
+      if (edificio && BUILDINGS[edificio]) this.tryPlace(edificio, t.x, t.y, true);
+      else if (oficio) {
+        const { x, y } = this.iso(t.x, t.y);
+        const s = this.add.image(x, y - 15, oficio).setDepth(8000);
+        s.setData('role', oficio);
+        s.setScale(1.8);
+        this.settlers.push(s);
+        this.wanderRole(s);
+      }
+    }
+  }
+
+  private placeExtraInitial() {
     this.tryPlace('cantera', this.center.x + 3, this.center.y - 2, true);
     this.tryPlace('residenciaS', this.center.x - 1, this.center.y + 3, true);
     this.tryPlace('residenciaM', this.center.x + 2, this.center.y + 4, true);
@@ -264,7 +298,8 @@ export class GameScene extends Phaser.Scene {
 
   onTileClicked(tx: number, ty: number) {
     if (!this.pendingBuild) return;
-    if (this.terrainAt(tx, ty) === 'water') {
+    const t = terrainAt(tx, ty);
+    if (t === 'water' || t === 'waterB' || t === 'waterC') {
       this.hintText.setText('⛔ No se puede construir en el agua').setY(44);
       this.time.delayedCall(1500, () => this.hintText.setText(''));
       return;
@@ -288,44 +323,42 @@ export class GameScene extends Phaser.Scene {
     const { x, y } = this.iso(tx, ty);
     const depth = 6000 + ty * 4;
     const parts: Phaser.GameObjects.GameObject[] = [];
-    parts.push(this.add.image(0, -2, 'shadow').setAlpha(0.75));
-    // entorno vivo según edificio
+    parts.push(this.add.image(0, -2, 'shadow').setAlpha(0.75).setScale(1.8));
     this.surroundings(id, x, y, depth, parts);
-    const img = this.add.image(0, -34, BUILD_TEX[id]).setOrigin(0.5, 1);
+    const img = this.add.image(0, -34, BUILD_TEX[id]).setOrigin(0.5, 1).setScale(1.7);
     parts.push(img);
     const name = this.add.text(0, 3, def.nombre, { fontSize: '9px', color: '#fff', backgroundColor: '#00000077', padding: { x: 4, y: 2 } }).setOrigin(0.5);
     parts.push(name);
     const c = this.add.container(x, y, parts).setDepth(depth);
-    // aspas del molino girando
     if (id === 'molino') {
-      const blades = this.add.image(34, -88, 'mill-blades').setScale(0.62);
+      const blades = this.add.image(58, -150, 'mill-blades').setScale(1);
       c.add(blades);
       this.tweens.add({ targets: blades, angle: 360, duration: 5200, repeat: -1 });
     }
     if (GLOWERS.has(id)) {
-      const glow = this.add.image(0, -52, 'glow').setAlpha(0.5).setScale(1.4);
+      const glow = this.add.image(0, -52, 'glow').setAlpha(0.5).setScale(2.2);
       c.add(glow);
       this.tweens.add({ targets: glow, alpha: 0.2, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     }
-    // andamio + obrero durante la obra
-    const scaffold = this.add.image(0, -34, 'scaffold').setOrigin(0.5, 1).setAlpha(0.95);
+    const scaffold = this.add.image(0, -34, 'scaffold').setOrigin(0.5, 1).setAlpha(0.95).setScale(1.7);
     c.add(scaffold);
     img.setAlpha(0.45);
-    const worker = this.add.image(26, -12, 'carrier');
+    const worker = this.add.image(44, -12, 'carrier').setScale(1.8);
     c.add(worker);
     this.tweens.add({ targets: worker, y: -16, duration: 380, yoyo: true, repeat: 8 });
     this.drawPath(x, y, depth - 1);
     this.tweens.add({
       targets: [scaffold], alpha: 0, duration: Math.min(def.tiempoConstruccionMs, 4000),
-      onComplete: () => { scaffold.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img); },
+      onComplete: () => { scaffold.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, 1.7); },
     });
     this.placed.push({ id, tx, ty, sprite: c, done: 0, total: def.tiempoConstruccionMs });
-    if (SMOKERS.has(id)) this.addSmoke(x, y - 92, depth + 1);
+    if (SMOKERS.has(id)) this.addSmoke(x, y - 150, depth + 1);
     if (id === 'torre') this.territoryRadius += 1.5;
     if (id === 'cuartel') {
       for (const t of ['soldier', 'archer']) {
-        const s = this.add.image(x + 26, y - 15, t).setDepth(8000);
+        const s = this.add.image(x + 44, y - 15, t).setDepth(8000);
         s.setData('role', t);
+        s.setScale(1.8);
         this.settlers.push(s);
         this.wanderRole(s);
       }
@@ -334,91 +367,86 @@ export class GameScene extends Phaser.Scene {
     return true;
   }
 
-  /** Props y senderos que hacen que cada edificio "respire". */
+  private popIn(img: Phaser.GameObjects.Image, base: number) {
+    img.setScale(base * 0.85);
+    this.tweens.add({ targets: img, scale: base, duration: 300, ease: 'Back.easeOut' });
+  }
+
   private surroundings(id: BuildingId, x: number, y: number, depth: number, parts: Phaser.GameObjects.GameObject[]) {
-    const add = (tex: string, dx: number, dy: number, s = 1, alpha = 1) => {
+    const add = (tex: string, dx: number, dy: number, s = 1.7, alpha = 1) => {
       const p = this.add.image(dx, dy, tex).setScale(s).setAlpha(alpha);
       parts.push(p);
     };
     switch (id) {
-      case 'almacen': add('crates', -38, -6); add('fence', 34, -4); break;
-      case 'cabanaLenador': add('logs', -36, -4); add('stump', 32, -2); break;
-      case 'aserradero': add('logs', 36, -4); break;
-      case 'cantera': add('stones', 34, -4); break;
+      case 'almacen': add('crates', -64, -6); add('fence', 58, -4); break;
+      case 'cabanaLenador': add('logs', -62, -4); add('stump', 54, -2); break;
+      case 'aserradero': add('logs', 62, -4); break;
+      case 'cantera': add('stones', 58, -4); break;
       case 'residenciaS': case 'residenciaM': case 'residenciaL':
-        add('fence', -36, -2); add('flowers', 30, 0); break;
+        add('fence', -62, -2); add('flowers', 52, 0); break;
       case 'granja':
-        add('fence', -40, -2); add('fence', 40, -2);
-        add('field', 0, 26, 1, 0.95); break;
-      case 'pozo': add('flowers', -26, 0); break;
-      case 'fundicion': case 'herreria': add('crates', 36, -4); break;
-      case 'cuartel': case 'armeria': add('fence', -38, -2); add('fence', 38, -2); break;
-      case 'torre': add('stones', 30, -2, 0.8); break;
-      case 'ornamento': add('flowers', -34, 0); add('flowers', 34, 0); add('tuft', -22, 2); add('tuft', 22, 2); break;
+        add('fence', -68, -2); add('fence', 68, -2);
+        add('field', 0, 44, 1.7, 0.95); break;
+      case 'pozo': add('flowers', -44, 0); break;
+      case 'fundicion': case 'herreria': add('crates', 62, -4); break;
+      case 'cuartel': case 'armeria': add('fence', -64, -2); add('fence', 64, -2); break;
+      case 'torre': add('stones', 52, -2, 1.4); break;
+      case 'ornamento': add('flowers', -58, 0); add('flowers', 58, 0); add('tuft', -38, 2); add('tuft', 38, 2); break;
       default: break;
     }
   }
 
-  /** Sendero de tierra desde el almacén hasta el nuevo edificio. */
   private drawPath(x: number, y: number, depth: number) {
     if (!this.placed.length) return;
     const a = this.iso(this.placed[0].tx, this.placed[0].ty);
     const steps = 7;
     for (let i = 1; i < steps; i++) {
-      const px = a.x + ((x - a.x) * i) / steps + Phaser.Math.Between(-8, 8);
-      const py = a.y + ((y - a.y) * i) / steps + Phaser.Math.Between(-4, 4);
-      this.add.image(px, py + 4, 'pathdot').setDepth(depth).setAlpha(0.5);
+      const px = a.x + ((x - a.x) * i) / steps + Phaser.Math.Between(-14, 14);
+      const py = a.y + ((y - a.y) * i) / steps + Phaser.Math.Between(-8, 8);
+      this.add.image(px, py + 8, 'pathdot').setDepth(depth).setAlpha(0.5).setScale(1.8);
     }
-  }
-
-  private popIn(img: Phaser.GameObjects.Image) {
-    img.setScale(0.85);
-    this.tweens.add({ targets: img, scale: 1, duration: 300, ease: 'Back.easeOut' });
   }
 
   private addSmoke(x: number, y: number, depth: number) {
     const puff = () => {
       if (!this.scene.isActive()) return;
-      const p = this.add.circle(x + Phaser.Math.Between(-3, 3), y, 3.2, 0xf5f0e8, 0.5).setDepth(depth);
+      const p = this.add.circle(x + Phaser.Math.Between(-5, 5), y, 5, 0xf5f0e8, 0.5).setDepth(depth);
       this.tweens.add({
-        targets: p, y: y - 30, x: x + Phaser.Math.Between(5, 13), alpha: 0, scale: 2.2,
+        targets: p, y: y - 50, x: x + Phaser.Math.Between(8, 22), alpha: 0, scale: 2.2,
         duration: 1900, onComplete: () => p.destroy(),
       });
     };
     this.time.addEvent({ delay: 850, loop: true, callback: puff });
   }
 
-  // ---------- Ambiente: nubes, aves, mariposas ----------
   private setupAmbient() {
     for (let i = 0; i < 5; i++) {
-      const x = Phaser.Math.Between(-700, 700);
-      const y = Phaser.Math.Between(-260, 260);
-      const cloud = this.add.image(x, y, 'cloud').setDepth(9300).setAlpha(0.8).setScale(0.9 + Math.random() * 0.9);
-      const shade = this.add.ellipse(x, y + 170, 120, 34, 0x000000, 0.1).setDepth(9390);
+      const x = Phaser.Math.Between(-1400, 1400);
+      const y = Phaser.Math.Between(-500, 500);
+      const cloud = this.add.image(x, y, 'cloud').setDepth(9300).setAlpha(0.8).setScale(1.6 + Math.random() * 1.4);
+      const shade = this.add.ellipse(x, y + 300, 200, 55, 0x000000, 0.1).setDepth(9390);
       const speed = Phaser.Math.Between(60000, 110000);
       this.tweens.add({
-        targets: [cloud], x: x + 1600, duration: speed, repeat: -1,
-        onUpdate: () => shade.setPosition(cloud.x, cloud.y + 170),
-        onRepeat: () => { cloud.x = -900; },
+        targets: [cloud], x: x + 3200, duration: speed, repeat: -1,
+        onUpdate: () => shade.setPosition(cloud.x, cloud.y + 300),
+        onRepeat: () => { cloud.x = -1800; },
       });
     }
-    // aves cruzando de vez en cuando
     const birdFly = () => {
       if (!this.scene.isActive()) return;
-      const y = Phaser.Math.Between(-200, 300);
-      const b = this.add.image(-800, y, 'bird').setDepth(9350).setScale(1.4);
-      this.tweens.add({ targets: b, x: 900, duration: Phaser.Math.Between(9000, 14000), onComplete: () => b.destroy() });
-      this.tweens.add({ targets: b, scaleY: 0.4, duration: 220, yoyo: true, repeat: 40 });
+      const y = Phaser.Math.Between(-400, 600);
+      const b = this.add.image(-1600, y, 'bird').setDepth(9350).setScale(2.4);
+      this.tweens.add({ targets: b, x: 1800, duration: Phaser.Math.Between(9000, 14000), onComplete: () => b.destroy() });
+      this.tweens.add({ targets: b, scaleY: 0.7, duration: 220, yoyo: true, repeat: 40 });
     };
     this.time.addEvent({ delay: 7000, loop: true, callback: birdFly });
-    // mariposas en el centro
     for (let i = 0; i < 4; i++) {
       const c = this.iso(this.center.x + Phaser.Math.Between(-4, 4), this.center.y + Phaser.Math.Between(-4, 4));
-      const f = this.add.image(c.x, c.y - 12, 'butterfly').setDepth(8600).setScale(1.2);
+      const f = this.add.image(c.x, c.y - 20, 'butterfly').setDepth(8600).setScale(2);
       const flutter = () => {
         if (!f.active) return;
         this.tweens.add({
-          targets: f, x: f.x + Phaser.Math.Between(-46, 46), y: f.y + Phaser.Math.Between(-24, 24),
+          targets: f, x: f.x + Phaser.Math.Between(-80, 80), y: f.y + Phaser.Math.Between(-40, 40),
           duration: Phaser.Math.Between(1400, 2600), ease: 'Sine.easeInOut', onComplete: flutter,
         });
       };
@@ -484,7 +512,7 @@ export class GameScene extends Phaser.Scene {
 
   override update() {
     const cam = this.cameras.main;
-    const speed = 12 / cam.zoom;
+    const speed = 22 / cam.zoom;
     const keys = this.input.keyboard?.createCursorKeys();
     if (keys?.left.isDown || this.wasd?.A.isDown) cam.scrollX -= speed;
     if (keys?.right.isDown || this.wasd?.D.isDown) cam.scrollX += speed;

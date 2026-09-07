@@ -9,54 +9,12 @@ export class BootScene extends Phaser.Scene {
   }
 
   create() {
-    this.makeTiles();
     this.makeNature();
     this.makeProps();
     this.makePeople();
     this.makeBuildings();
     this.makeFx();
     this.scene.start('game');
-  }
-
-  // ============ TILES 64x32 ============
-  private tile(key: string, base: number, edge: number, speckles: [number, number, number][] = []) {
-    const g = this.make.graphics({ x: 0, y: 0 }, false);
-    const w = 64;
-    const h = 32;
-    g.fillStyle(base, 1);
-    g.beginPath();
-    g.moveTo(w / 2, 1);
-    g.lineTo(w - 1, h / 2);
-    g.lineTo(w / 2, h - 1);
-    g.lineTo(1, h / 2);
-    g.closePath();
-    g.fillPath();
-    g.lineStyle(1, edge, 1);
-    g.strokePath();
-    for (const [sx, sy, c] of speckles) {
-      g.fillStyle(c, 0.9);
-      g.fillCircle(sx, sy, 1.4);
-    }
-    g.lineStyle(1, 0xffffff, 0.1);
-    g.beginPath();
-    g.moveTo(w / 2, 2);
-    g.lineTo(w - 2, h / 2);
-    g.strokePath();
-    g.generateTexture(key, w, h);
-    g.destroy();
-  }
-
-  private makeTiles() {
-    this.tile('grass0', 0x4d9240, 0x67ac58, [[20, 14, 0x3e7832], [40, 18, 0x62a854], [32, 22, 0x3e7832], [46, 12, 0x7cba68]]);
-    this.tile('grass1', 0x478a3a, 0x609e51, [[16, 18, 0x3a7330], [38, 12, 0x5aa34b], [28, 22, 0x3a7330], [50, 20, 0x74b364]]);
-    this.tile('grass2', 0x559a4b, 0x70af60, [[22, 16, 0x82c96f], [42, 20, 0x427f36], [30, 12, 0x93d581]]);
-    this.tile('sand', 0xdcb76f, 0xebcd8f, [[20, 16, 0xc79e55], [42, 14, 0xebcd8f], [32, 22, 0xc79e55]]);
-    this.tile('dirt', 0xa9804f, 0xc49a63, [[18, 14, 0x8a6538], [40, 18, 0xbd9260], [30, 22, 0x8a6538]]);
-    this.tile('water', 0x2f6fb4, 0x5aa3e0, [[22, 16, 0x82c6f2], [40, 20, 0x2a5f96], [30, 12, 0xa8d8f8]]);
-    this.tile('water2', 0x2b6aae, 0x55a0dc, [[30, 14, 0x82c6f2], [20, 20, 0x2a5f96], [44, 14, 0xa8d8f8]]);
-    this.tile('forest', 0x3e7d33, 0x559a4b, [[18, 14, 0x2e6026], [44, 20, 0x559a4b], [30, 12, 0x6cab5c]]);
-    this.tile('mountain', 0x8d929b, 0xbdc2ca, [[20, 18, 0x6e737c], [42, 14, 0xd6d9de], [32, 22, 0x6e737c]]);
-    this.tile('field', 0x7a5a34, 0x9a7a4a, [[14, 12, 0x5e4426], [30, 16, 0x8f6c3e], [46, 14, 0x5e4426]]);
   }
 
   // ============ NATURALEZA ============
