@@ -215,6 +215,27 @@ for (let i = 1; i <= 5; i++) {
   const meta = await sharp(img).metadata();
   nature.bushes[i] = { w: meta.width, h: meta.height, hotspot: hotspotOf(readFileSync(lua, 'utf8')) ?? [Math.round(meta.width / 2), meta.height] };
 }
+// matas de hierba y setas (detalle de suelo)
+nature.grass = {};
+for (let i = 1; i <= 3; i++) {
+  const dir = join(WLW, `immovables/plants/grass${i}`);
+  const lua = join(dir, 'init.lua');
+  const img = join(dir, 'idle.png');
+  if (!existsSync(lua) || !existsSync(img)) { fail.push(`mata ${i}`); continue; }
+  copyFileSync(img, join(OUT, 'nature', `grass-${i}.png`));
+  const meta = await sharp(img).metadata();
+  nature.grass[i] = { w: meta.width, h: meta.height, hotspot: hotspotOf(readFileSync(lua, 'utf8')) ?? [Math.round(meta.width / 2), meta.height] };
+}
+nature.shrooms = {};
+for (let i = 1; i <= 2; i++) {
+  const dir = join(WLW, `immovables/miscellaneous/mushroom${i}`);
+  const lua = join(dir, 'init.lua');
+  const img = join(dir, 'idle.png');
+  if (!existsSync(lua) || !existsSync(img)) { fail.push(`seta ${i}`); continue; }
+  copyFileSync(img, join(OUT, 'nature', `shroom-${i}.png`));
+  const meta = await sharp(img).metadata();
+  nature.shrooms[i] = { w: meta.width, h: meta.height, hotspot: hotspotOf(readFileSync(lua, 'utf8')) ?? [Math.round(meta.width / 2), meta.height] };
+}
 
 // --- Critters: mismo formato que workers ---
 const critters = {};
@@ -336,6 +357,8 @@ const ts =
   `export const WL_TREES: Record<string, WlNatureItem> = ${JSON.stringify(nature.trees)};\n` +
   `export const WL_ROCKS: Record<string, WlNatureItem> = ${JSON.stringify(nature.rocks)};\n` +
   `export const WL_BUSHES: Record<string, WlNatureItem> = ${JSON.stringify(nature.bushes)};\n` +
+  `export const WL_GRASS: Record<string, WlNatureItem> = ${JSON.stringify(nature.grass)};\n` +
+  `export const WL_SHROOMS: Record<string, WlNatureItem> = ${JSON.stringify(nature.shrooms)};\n` +
   `export interface WlCritterDir { file: string; w: number; h: number; fw: number; fh: number }\n` +
   `export interface WlCritter { grid: { fps: number; frames: number; columns: number; rows: number }; dirs: Record<string, WlCritterDir> }\n` +
   `export const WL_CRITTERS: Record<string, WlCritter> = ${JSON.stringify(critters)};\n` +

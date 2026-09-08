@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { playSfx } from '../audio';
 import { BUILDINGS, INITIAL_STOCK, RECIPES, type BuildingId, type ResourceId } from '../data/buildings';
-import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_RES_ICONS, WL_ROCKS, WL_SHIPS, WL_TREES, WL_WHEAT, WL_WHEAT_ORDER, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
+import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_GRASS, WL_RES_ICONS, WL_ROCKS, WL_SHIPS, WL_SHROOMS, WL_TREES, WL_WHEAT, WL_WHEAT_ORDER, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
 import { DAY_LENGTH_MS, skyAt } from '../systems/daynight';
 import { findPath, smoothPath, type GridPos } from '../systems/pathfinding';
 import { applyDamage, attackReach, recruitCost, soldierDps, towerDps, VICTORY_WAVES, waveSpec } from '../systems/combat';
@@ -178,6 +178,12 @@ export class GameScene extends Phaser.Scene {
     for (const [name] of Object.entries(WL_BUSHES)) {
       this.load.image(`wl-bush-${name}`, `/assets/wl/nature/bush-${name}.png`);
     }
+    for (const [name] of Object.entries(WL_GRASS)) {
+      this.load.image(`wl-grass-${name}`, `/assets/wl/nature/grass-${name}.png`);
+    }
+    for (const [name] of Object.entries(WL_SHROOMS)) {
+      this.load.image(`wl-shroom-${name}`, `/assets/wl/nature/shroom-${name}.png`);
+    }
     for (const [name, c] of Object.entries(WL_CRITTERS)) {
       for (const [dir, d] of Object.entries(c.dirs)) {
         if (dir === 'idle') {
@@ -331,6 +337,8 @@ export class GameScene extends Phaser.Scene {
     this.spawnCritters();
     this.setupAmbient();
     this.setupNight();
+    this.setupMapFrame();
+    this.setupParticles();
     this.exposeBridge();
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.tickEconomy() });
     this.time.addEvent({ delay: 700, loop: true, callback: () => this.animateWater() });
@@ -485,18 +493,30 @@ export class GameScene extends Phaser.Scene {
     const treeNames = Object.keys(WL_TREES);
     const rockNames = Object.keys(WL_ROCKS);
     const bushNames = Object.keys(WL_BUSHES);
+    const grassNames = Object.keys(WL_GRASS);
+    const shroomNames = Object.keys(WL_SHROOMS);
     if (t === 'forest' && n > 0.2 && treeNames.length) {
       const name = treeNames[Math.floor(n * treeNames.length) % treeNames.length];
       const art = WL_TREES[name];
       const ox = art.hotspot[0] / art.w;
       const oy = art.hotspot[1] / art.h;
+      const tscale = 1.1 + n * 0.5;
       if (art.sheet) {
         const tree = this.add.sprite(x + Phaser.Math.Between(-20, 20), y - 6, `wl-tree-${name}`, 0)
-          .setOrigin(ox, oy).setDepth(depth).setScale(1.1 + n * 0.5);
+          .setOrigin(ox, oy).setDepth(depth).setScale(tscale);
         tree.play(`wl-tree-${name}`);
+        if (n > 0.86) tree.setTint(0xddaa66); // ejemplar otoñal
       } else {
-        this.add.image(x + Phaser.Math.Between(-20, 20), y - 6, `wl-tree-${name}`)
-          .setOrigin(ox, oy).setDepth(depth).setScale(1.1 + n * 0.5);
+        const tree = this.add.image(x + Phaser.Math.Between(-20, 20), y - 6, `wl-tree-${name}`)
+          .setOrigin(ox, oy).setDepth(depth).setScale(tscale);
+        if (n > 0.86) tree.setTint(0xddaa66);
+      }
+      if (n > 0.7 && shroomNames.length) {
+        const sn = shroomNames[Math.floor(n * shroomNames.length) % shroomNames.length];
+        const sa = WL_SHROOMS[sn];
+        this.add.image(x - 18, y + 6, `wl-shroom-${sn}`)
+          .setOrigin(sa.hotspot[0] / sa.w, sa.hotspot[1] / sa.h)
+          .setDepth(depth).setScale(1.2);
       }
     } else if (t === 'mountain' && n > 0.3 && rockNames.length) {
       const name = rockNames[Math.floor(n * rockNames.length) % rockNames.length];
@@ -504,12 +524,20 @@ export class GameScene extends Phaser.Scene {
       this.add.image(x, y - 4, `wl-rock-${name}`)
         .setOrigin(art.hotspot[0] / art.w, art.hotspot[1] / art.h)
         .setDepth(depth).setScale(1.2 + n * 0.6);
-    } else if ((t === 'grass' || t === 'grassB' || t === 'grassC') && n > 0.88 && bushNames.length) {
-      const name = bushNames[Math.floor(n * bushNames.length) % bushNames.length];
-      const art = WL_BUSHES[name];
-      this.add.image(x + 14, y + 2, `wl-bush-${name}`)
-        .setOrigin(art.hotspot[0] / art.w, art.hotspot[1] / art.h)
-        .setDepth(depth).setAlpha(0.95);
+    } else if ((t === 'grass' || t === 'grassB' || t === 'grassC') && grassNames.length) {
+      if (n > 0.82 && bushNames.length) {
+        const name = bushNames[Math.floor(n * bushNames.length) % bushNames.length];
+        const art = WL_BUSHES[name];
+        this.add.image(x + 14, y + 2, `wl-bush-${name}`)
+          .setOrigin(art.hotspot[0] / art.w, art.hotspot[1] / art.h)
+          .setDepth(depth).setAlpha(0.95);
+      } else if (n > 0.35) {
+        const name = grassNames[Math.floor(n * grassNames.length) % grassNames.length];
+        const art = WL_GRASS[name];
+        this.add.image(x + Phaser.Math.Between(-22, 22), y + Phaser.Math.Between(-4, 6), `wl-grass-${name}`)
+          .setOrigin(art.hotspot[0] / art.w, art.hotspot[1] / art.h)
+          .setDepth(depth).setAlpha(0.9);
+      }
     } else if (t === 'sand' && n > 0.55) {
       this.add.image(x, y - 24, 'palm').setDepth(depth).setScale(1.7 + n * 0.5);
     }
@@ -557,7 +585,11 @@ export class GameScene extends Phaser.Scene {
         if (t && t.x >= 0 && t.y >= 0 && t.x < MAP && t.y < MAP) {
           const { x, y } = this.iso(t.x, t.y);
           this.hoverMarker.setPosition(x, y).setVisible(true);
-        } else this.hoverMarker.setVisible(false);
+          this.updateGhost(t.x, t.y, x, y);
+        } else {
+          this.hoverMarker.setVisible(false);
+          this.clearGhost();
+        }
       }
     });
     this.input.on('pointerup', () => { dragging = false; });
@@ -590,12 +622,143 @@ export class GameScene extends Phaser.Scene {
   }
 
   private wasd?: { W: Phaser.Input.Keyboard.Key; A: Phaser.Input.Keyboard.Key; S: Phaser.Input.Keyboard.Key; D: Phaser.Input.Keyboard.Key };
+  private ghost?: Phaser.GameObjects.Image | null;
+  private selectRing?: Phaser.GameObjects.Graphics | null;
+  private mapFrame?: Phaser.GameObjects.Graphics | null;
 
   private setupInput() {
-    this.input.keyboard?.on('keydown-ESC', () => { this.pendingBuild = null; this.hintText?.setText(''); });
+    this.input.keyboard?.on('keydown-ESC', () => {
+      this.pendingBuild = null;
+      this.hintText?.setText('');
+      this.clearGhost();
+    });
     if (this.input.keyboard) {
       this.wasd = this.input.keyboard.addKeys('W,A,S,D') as { W: Phaser.Input.Keyboard.Key; A: Phaser.Input.Keyboard.Key; S: Phaser.Input.Keyboard.Key; D: Phaser.Input.Keyboard.Key };
     }
+  }
+
+  /** Previsualización fantasma del edificio pendiente sobre la loseta. */
+  private updateGhost(tx: number, ty: number, x: number, y: number) {
+    if (!this.pendingBuild) {
+      this.clearGhost();
+      return;
+    }
+    const id = this.pendingBuild;
+    const art = WL_BUILDINGS[id];
+    if (!art) return;
+    if (!this.ghost || this.ghost.getData('bid') !== id) {
+      this.clearGhost();
+      const ox = art.hotspot[0] / art.w;
+      const oy = art.hotspot[1] / art.h;
+      this.ghost = this.add.image(x, y, WL_TEX[id])
+        .setOrigin(ox, oy).setScale(wlBuildingScale(art.w, art.h))
+        .setAlpha(0.55).setDepth(9500);
+      this.ghost.setData('bid', id);
+    } else {
+      this.ghost.setPosition(x, y);
+    }
+    const ok = this.canPlace(id, tx, ty);
+    this.ghost.setTint(ok ? 0x88ff88 : 0xff6666);
+  }
+
+  private clearGhost() {
+    this.ghost?.destroy();
+    this.ghost = null;
+  }
+
+  private canPlace(id: BuildingId, tx: number, ty: number): boolean {
+    if (tx < 1 || ty < 1 || tx >= MAP - 1 || ty >= MAP - 1) return false;
+    if (this.buildingTiles.has(`${tx},${ty}`)) return false;
+    const t = terrainAt(tx, ty);
+    if (t === 'water' || t === 'waterB' || t === 'waterC' || t === 'mountain') return false;
+    if ((id === 'puerto' || id === 'pesqueria') && !this.adjacentWater(tx, ty)) return false;
+    const cost = BUILDINGS[id].coste;
+    return Object.entries(cost).every(([k, v]) => (this.stock[k as ResourceId] ?? 0) >= (v ?? 0));
+  }
+
+  private adjacentWater(tx: number, ty: number): boolean {
+    const at = (ax: number, ay: number) => (ax < 0 || ay < 0 || ax >= MAP || ay >= MAP ? null : terrainAt(ax, ay));
+    return touchesWater(tx, ty, at);
+  }
+
+  /** Hojas, brasas y salpicaduras ambientales (vida sin coste de CPU). */
+  private setupParticles() {
+    // hojas que caen junto a un bosque aleatorio
+    this.time.addEvent({
+      delay: 1400, loop: true,
+      callback: () => {
+        if (!this.forestTiles.length) return;
+        const t = this.forestTiles[Phaser.Math.Between(0, this.forestTiles.length - 1)];
+        const { x, y } = this.iso(t.x, t.y);
+        const leaf = this.add.ellipse(
+          x + Phaser.Math.Between(-30, 30), y - 60,
+          5, 3, [0x6cab5c, 0xd9a441, 0xdd8844][Phaser.Math.Between(0, 2)], 0.9,
+        ).setDepth(8600);
+        this.tweens.add({
+          targets: leaf, y: y - 6, x: leaf.x + Phaser.Math.Between(-26, 26),
+          duration: Phaser.Math.Between(1400, 2400), ease: 'Sine.easeInOut',
+          onComplete: () => leaf.destroy(),
+        });
+      },
+    });
+    // brasas sobre fundición y herrería
+    this.time.addEvent({
+      delay: 900, loop: true,
+      callback: () => {
+        const forges = this.placed.filter((p) => p.id === 'fundicion' || p.id === 'herreria');
+        if (!forges.length) return;
+        const p = forges[Phaser.Math.Between(0, forges.length - 1)];
+        const { x, y } = this.iso(p.tx, p.ty);
+        const ember = this.add.circle(x + Phaser.Math.Between(-8, 8), y - 60, 2, 0xff9a2e, 0.9).setDepth(8600);
+        this.tweens.add({
+          targets: ember, y: y - 110, alpha: 0, duration: Phaser.Math.Between(900, 1500),
+          onComplete: () => ember.destroy(),
+        });
+      },
+    });
+    // salpicaduras en la orilla
+    this.time.addEvent({
+      delay: 1100, loop: true,
+      callback: () => {
+        if (!this.shoreTiles.length) return;
+        const t = this.shoreTiles[Phaser.Math.Between(0, this.shoreTiles.length - 1)];
+        const { x, y } = this.iso(t.x, t.y);
+        const sp = this.add.circle(x + Phaser.Math.Between(-24, 24), y, 2.5, 0xffffff, 0.55).setDepth(52);
+        this.tweens.add({ targets: sp, alpha: 0, scale: 2, duration: 900, onComplete: () => sp.destroy() });
+      },
+    });
+  }
+
+  /** Anillo pulsante sobre el edificio inspeccionado. */
+  private showSelectRing(tx: number, ty: number) {
+    this.selectRing?.destroy();
+    const { x, y } = this.iso(tx, ty);
+    const g = this.add.graphics().setDepth(9490);
+    g.lineStyle(3, 0xfde68a, 1);
+    g.strokeEllipse(x, y - 10, 110, 44);
+    this.tweens.add({ targets: g, alpha: 0.35, duration: 600, yoyo: true, repeat: -1 });
+    this.selectRing = g;
+  }
+
+  private hideSelectRing() {
+    this.selectRing?.destroy();
+    this.selectRing = null;
+  }
+
+  /** Marco del viewport principal dibujado SOLO en el minimapa. */
+  private setupMapFrame() {
+    const g = this.add.graphics().setDepth(9600);
+    this.cameras.main.ignore(g);
+    this.mapFrame = g;
+  }
+
+  private drawMapFrame() {
+    if (!this.mapFrame || !this.minimap) return;
+    const wv = this.cameras.main.worldView;
+    const g = this.mapFrame;
+    g.clear();
+    g.lineStyle(6, 0xfde68a, 0.85);
+    g.strokeRect(wv.x, wv.y, wv.width, wv.height);
   }
 
   // ---------- Población con oficios y zonas ----------
@@ -1579,7 +1742,12 @@ export class GameScene extends Phaser.Scene {
       // selección: publica la ficha para el panel React
       const game = (window as unknown as { __game?: { inspect: (x: number, y: number) => object | null } }).__game;
       ww.__inspect = game?.inspect(tx, ty) ?? null;
-      if (ww.__inspect) playSfx('select');
+      if (ww.__inspect) {
+        playSfx('select');
+        this.showSelectRing(tx, ty);
+      } else {
+        this.hideSelectRing();
+      }
       return;
     }
     const t = terrainAt(tx, ty);
@@ -1590,6 +1758,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.tryPlace(this.pendingBuild, tx, ty, false);
     this.pendingBuild = null;
+    this.clearGhost();
     this.hintText.setText('');
   }
 
@@ -1845,6 +2014,7 @@ export class GameScene extends Phaser.Scene {
     w.__game = {
       place: (id: BuildingId) => {
         this.pendingBuild = id;
+        this.hideSelectRing();
         this.hintText?.setText(`🏗 ${BUILDINGS[id].nombre}: clic en una loseta (ESC cancela)`).setY(44);
       },
       stock: () => ({ ...this.stock }),
@@ -1915,5 +2085,6 @@ export class GameScene extends Phaser.Scene {
     this.updateWalkers(dt * 1000);
     this.updateShips(dt);
     this.updateEnemies(dt);
+    this.drawMapFrame();
   }
 }
