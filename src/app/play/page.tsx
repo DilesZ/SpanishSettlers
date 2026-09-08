@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { playSfx, unlockAudio } from '@/game/audio';
+import { isMusicEnabled, setMusicEnabled, startMusic } from '@/game/music';
 import { BUILDINGS, type BuildingId, type ResourceId } from '@/game/data/buildings';
 
 // Dynamic import: el canvas pesado solo en cliente (skill bundle-dynamic-imports).
@@ -51,6 +52,7 @@ export default function PlayPage() {
   const [selected, setSelected] = useState<BuildingId | null>(null);
   const [inspect, setInspect] = useState<Inspect | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [music, setMusic] = useState(true);
   const [objectives, setObjectives] = useState<{ id: string; text: string; done: boolean }[]>([]);
   const [ending, setEnding] = useState<{ status: string; wave: number; kills: number; buildings: number; timeSec: number } | null>(null);
 
@@ -97,6 +99,20 @@ export default function PlayPage() {
     return () => { clearInterval(t); clearTimeout(id); };
   }, []);
 
+  useEffect(() => {
+    setMusic(isMusicEnabled());
+    const start = () => startMusic();
+    window.addEventListener('pointerdown', start, { once: true });
+    return () => window.removeEventListener('pointerdown', start);
+  }, []);
+
+  const toggleMusic = () => {
+    const next = !music;
+    setMusic(next);
+    setMusicEnabled(next);
+    if (next) startMusic();
+  };
+
   const build = (id: BuildingId) => {
     unlockAudio();
     playSfx('click');
@@ -123,6 +139,9 @@ export default function PlayPage() {
         <h1 className="text-lg font-bold tracking-wide">SpanishSettlers — partida web</h1>
         <div className="flex items-center gap-2 text-xs text-amber-200/70">
           <span className="hidden md:inline">Clic en edificio = info · Minimapa = viajar</span>
+          <button onClick={toggleMusic} className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/10" title="Música ambiental">
+            {music ? '♪ On' : '♪ Off'}
+          </button>
           <button onClick={doSave} className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/10">💾 Guardar{savedAt ? ` (${savedAt})` : ''}</button>
           <button onClick={doLoad} className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/10">📂 Cargar</button>
         </div>
