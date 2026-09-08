@@ -50,26 +50,63 @@ export default function PlayPage() {
   const [stock, setStock] = useState<Record<string, number> | null>(null);
   const [selected, setSelected] = useState<BuildingId | null>(null);
   const [inspect, setInspect] = useState<Inspect | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [objectives, setObjectives] = useState<{ id: string; text: string; done: boolean }[]>([]);
 
   useEffect(() => {
     const t = setInterval(() => {
-      const w = window as unknown as { __stock?: Record<string, number>; __inspect?: Inspect | null };
+      const w = window as unknown as {
+        __stock?: Record<string, number>;
+        __inspect?: Inspect | null;
+        __game?: { objectives: () => { id: string; text: string; done: boolean }[] };
+      };
       if (w.__stock) setStock({ ...w.__stock });
       if ('__inspect' in w) {
         setInspect(w.__inspect ?? null);
         delete w.__inspect;
       }
-    }, 400);
+      try {
+        const objs = w.__game?.objectives();
+        if (objs) setObjectives(objs);
+      } catch { /* juego aún arrancando */ }
+    }, 1000);
     return () => clearInterval(t);
+  }, []);
+
+  const game = () => (window as unknown as {
+    __game?: {
+      place: (id: BuildingId) => void;
+      save: () => string | null;
+      load: () => boolean;
+      hasSave: () => string | null;
+    };
+  }).__game;
+
+  const refreshSave = () => setSavedAt(game()?.hasSave() ?? null);
+
+  useEffect(() => {
+    const t = setInterval(refreshSave, 5000);
+    const id = setTimeout(refreshSave, 3000);
+    return () => { clearInterval(t); clearTimeout(id); };
   }, []);
 
   const build = (id: BuildingId) => {
     unlockAudio();
     playSfx('click');
-    const w = window as unknown as { __game?: { place: (id: BuildingId) => void } };
-    w.__game?.place(id);
+    game()?.place(id);
     setSelected(id);
     setInspect(null);
+  };
+
+  const doSave = () => {
+    unlockAudio();
+    const at = game()?.save() ?? null;
+    setSavedAt(at);
+  };
+
+  const doLoad = () => {
+    unlockAudio();
+    if (game()?.load()) setInspect(null);
   };
 
   return (
@@ -77,7 +114,11 @@ export default function PlayPage() {
       <header className="flex items-center justify-between border-b border-amber-200/15 px-4 py-3">
         <a href="/" className="text-sm text-amber-200/80 hover:text-amber-100">← Volver</a>
         <h1 className="text-lg font-bold tracking-wide">SpanishSettlers — partida web</h1>
-        <div className="text-xs text-amber-200/70">Arrastra con botón derecho · Rueda = zoom · WASD = mover · Clic en edificio = info</div>
+        <div className="flex items-center gap-2 text-xs text-amber-200/70">
+          <span className="hidden md:inline">Clic en edificio = info · Minimapa = viajar</span>
+          <button onClick={doSave} className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/10">💾 Guardar{savedAt ? ` (${savedAt})` : ''}</button>
+          <button onClick={doLoad} className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/10">📂 Cargar</button>
+        </div>
       </header>
 
       {stock && (
@@ -95,6 +136,19 @@ export default function PlayPage() {
       )}
 
       <div className="px-4"><GameCanvas /></div>
+
+      {objectives.length > 0 && (
+        <section className="mx-4 mt-2 rounded-xl border border-white/10 bg-white/5 p-3 text-xs">
+          <div className="mb-1 font-bold text-amber-200">🏆 Objetivos ({objectives.filter((o) => o.done).length}/{objectives.length})</div>
+          <div className="flex flex-wrap gap-2">
+            {objectives.map((o) => (
+              <span key={o.id} className={`rounded-full px-2 py-1 ${o.done ? 'bg-green-700/40 text-green-200 line-through' : 'bg-white/10 text-white/80'}`}>
+                {o.done ? '✓ ' : '○ '}{o.text}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
 
       {inspect && (
         <section className="mx-4 mt-2 flex items-center gap-3 rounded-xl border border-amber-300/40 bg-amber-300/10 p-3 text-sm">

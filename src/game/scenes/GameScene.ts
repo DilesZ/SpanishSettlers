@@ -5,6 +5,7 @@ import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_RES_ICONS, WL_ROCKS, WL_SHIPS,
 import { DAY_LENGTH_MS, skyAt } from '../systems/daynight';
 import { findPath, smoothPath, type GridPos } from '../systems/pathfinding';
 import { applyDamage, recruitCost, soldierDps, towerDps, waveSpec } from '../systems/combat';
+import { OBJECTIVES, isComplete } from '../systems/objectives';
 import { goodsFor, isNavigable, pickFishingCircuit, touchesWater } from '../systems/ships';
 import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
 import { tickJob, type ProductionJob, type Stock } from '../systems/economy';
@@ -77,6 +78,8 @@ const RECIPE_BY_BUILDING: Partial<Record<BuildingId, string>> = {
   fundicion: 'lingote-hierro', herreria: 'herramienta', armeria: 'espada',
 };
 
+const SAVE_KEY = 'spanish-settlers-b-save-v1';
+
 export class GameScene extends Phaser.Scene {
   stock: Stock = { ...INITIAL_STOCK };
   placed: Placed[] = [];
@@ -103,6 +106,8 @@ export class GameScene extends Phaser.Scene {
   private buildingHp = new Map<string, { hp: number; maxHp: number; bar: Phaser.GameObjects.Graphics }>();
   private waveNo = 0;
   private kills = 0;
+  private wavesRepelled = 0;
+  private doneObjectives = new Set<string>();
 
   constructor() {
     super('game');
@@ -328,6 +333,7 @@ export class GameScene extends Phaser.Scene {
     this.time.addEvent({ delay: 6000, loop: true, callback: () => this.wheatTick() });
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.skyTick() });
     this.time.addEvent({ delay: 500, loop: true, callback: () => this.combatTick() });
+    this.time.addEvent({ delay: 60000, loop: true, callback: () => this.saveGame(true) });
     this.time.delayedCall(75000, () => this.spawnWave());
     this.time.addEvent({ delay: 100000, loop: true, callback: () => this.spawnWave() });
     this.scale.on('resize', () => this.layoutMinimap());
@@ -528,6 +534,11 @@ export class GameScene extends Phaser.Scene {
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (p.rightButtonDown() || p.middleButtonDown()) { dragging = true; last = { x: p.x, y: p.y }; }
       else if (p.leftButtonDown()) {
+        if (this.minimap && this.inMinimap(p.x, p.y)) {
+          const wp = this.minimap.getWorldPoint(p.x, p.y);
+          cam.centerOn(wp.x, wp.y);
+          return;
+        }
         const wx = p.worldX;
         const wy = p.worldY;
         const t = this.groundLayer.worldToTileXY(wx, wy);
@@ -563,6 +574,14 @@ export class GameScene extends Phaser.Scene {
     const w = this.scale.width;
     const h = this.scale.height;
     this.minimap.setViewport(Math.max(8, w - 202), Math.max(8, h - 152), 190, 140);
+  }
+
+  private inMinimap(sx: number, sy: number): boolean {
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const vx = Math.max(8, w - 202);
+    const vy = Math.max(8, h - 152);
+    return sx >= vx && sx <= vx + 190 && sy >= vy && sy <= vy + 140;
   }
 
   private wasd?: { W: Phaser.Input.Keyboard.Key; A: Phaser.Input.Keyboard.Key; S: Phaser.Input.Keyboard.Key; D: Phaser.Input.Keyboard.Key };
@@ -1200,9 +1219,31 @@ export class GameScene extends Phaser.Scene {
     }
     if (!this.enemies.length) {
       this.stock.oro += 2;
+      this.wavesRepelled++;
       this.updateHud();
       this.hintText?.setText(`🛡 ¡Oleada ${this.waveNo} rechazada! +2 oro`).setY(44);
       playSfx('confirm');
+      this.time.delayedCall(4000, () => this.hintText.setText(''));
+    }
+  }
+
+  private checkObjectives() {
+    const army = this.walkers.filter((w) => w.kind === 'settler' && (w.role === 'soldier' || w.role === 'archer')).length;
+    const state = {
+      buildings: this.placed.map((p) => p.id),
+      army,
+      wavesRepelled: this.wavesRepelled,
+    };
+    for (const o of OBJECTIVES) {
+      if (this.doneObjectives.has(o.id)) continue;
+      if (!isComplete(o.id, state)) continue;
+      this.doneObjectives.add(o.id);
+      for (const [k, v] of Object.entries(o.reward)) {
+        this.stock[k as ResourceId] += v ?? 0;
+      }
+      this.updateHud();
+      this.hintText?.setText(`🏆 Objetivo: ${o.text} ¡recompensa!`).setY(44);
+      playSfx('built');
       this.time.delayedCall(4000, () => this.hintText.setText(''));
     }
   }
@@ -1214,8 +1255,89 @@ export class GameScene extends Phaser.Scene {
     this.walkers = this.walkers.filter((x) => x !== w);
   }
 
-  private destroyBuilding(tx: number, ty: number) {
-    const i = this.placed.findIndex((p) => p.tx === tx && p.ty === ty);
+  private saveGame(silent = false): string | null {
+    try {
+      const data = {
+        v: 1,
+        savedAt: Date.now(),
+        stock: this.stock,
+        placed: this.placed.map((p) => ({ id: p.id, tx: p.tx, ty: p.ty })),
+        waveNo: this.waveNo,
+        kills: this.kills,
+        wavesRepelled: this.wavesRepelled,
+        doneObjectives: [...this.doneObjectives],
+      };
+      window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+      if (!silent) playSfx('confirm');
+      return new Date(data.savedAt).toLocaleString();
+    } catch {
+      return null;
+    }
+  }
+
+  private loadGame(): boolean {
+    try {
+      const raw = window.localStorage.getItem(SAVE_KEY);
+      if (!raw) return false;
+      const data = JSON.parse(raw) as {
+        stock: Stock; placed: { id: BuildingId; tx: number; ty: number }[];
+        waveNo: number; kills: number; wavesRepelled?: number; doneObjectives?: string[];
+      };
+      if (!data || !Array.isArray(data.placed)) return false;
+      // limpiar mundo
+      for (const p of this.placed) p.sprite.destroy();
+      for (const w of this.walkers) {
+        w.sprite.destroy();
+        w.shadow.destroy();
+        w.goodsIcon?.destroy();
+      }
+      for (const s of this.ships) s.sprite.destroy();
+      for (const e of this.enemies) {
+        e.sprite.destroy();
+        e.shadow.destroy();
+        e.bar.destroy();
+      }
+      for (const plot of this.wheatPlots) plot.sprite.destroy();
+      for (const l of this.lanterns) l.destroy();
+      for (const rec of this.buildingHp.values()) rec.bar.destroy();
+      this.placed = [];
+      this.walkers = [];
+      this.ships = [];
+      this.enemies = [];
+      this.wheatPlots = [];
+      this.lanterns = [];
+      this.buildingHp.clear();
+      this.buildingTiles.clear();
+      this.jobs = [];
+      this.territoryRadius = 7;
+      // restaurar
+      this.stock = { ...data.stock };
+      this.waveNo = data.waveNo ?? 0;
+      this.kills = data.kills ?? 0;
+      this.wavesRepelled = data.wavesRepelled ?? 0;
+      this.doneObjectives = new Set(data.doneObjectives ?? []);
+      for (const p of data.placed) {
+        if (BUILDINGS[p.id]) this.tryPlace(p.id, p.tx, p.ty, true);
+      }
+      this.spawnPopulation();
+      this.spawnCritters();
+      for (const p of this.placed) {
+        if (p.id === 'puerto') {
+          this.spawnShip(p.tx, p.ty);
+          this.spawnShip(p.tx, p.ty);
+        }
+      }
+      this.updateHud();
+      playSfx('confirm');
+      this.hintText?.setText('💾 Partida cargada').setY(44);
+      this.time.delayedCall(3000, () => this.hintText.setText(''));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private destroyBuilding(tx: number, ty: number) {    const i = this.placed.findIndex((p) => p.tx === tx && p.ty === ty);
     if (i < 0) return;
     const [p] = this.placed.splice(i, 1);
     p.sprite.destroy();
@@ -1660,6 +1782,7 @@ export class GameScene extends Phaser.Scene {
       this.stock = r.stock;
       Object.assign(job, r.job);
     }
+    this.checkObjectives();
     this.updateHud();
   }
 
@@ -1676,6 +1799,10 @@ export class GameScene extends Phaser.Scene {
         stock: () => Stock;
         counts: () => number;
         recruit: () => boolean;
+        save: () => string | null;
+        load: () => boolean;
+        hasSave: () => string | null;
+        objectives: () => { id: string; text: string; done: boolean }[];
         inspect: (tx: number, ty: number) => {
           id: BuildingId; nombre: string; descripcion: string; categoria: string;
           receta?: { in: [string, number][]; out: [string, number][] };
@@ -1691,6 +1818,31 @@ export class GameScene extends Phaser.Scene {
       stock: () => ({ ...this.stock }),
       counts: () => this.placed.length,
       recruit: () => this.recruit(),
+      save: () => this.saveGame(),
+      load: () => this.loadGame(),
+      objectives: () => {
+        const army = this.walkers.filter((x) => x.kind === 'settler' && (x.role === 'soldier' || x.role === 'archer')).length;
+        const state = {
+          buildings: this.placed.map((p) => p.id),
+          army,
+          wavesRepelled: this.wavesRepelled,
+        };
+        return OBJECTIVES.map((o) => ({
+          id: o.id,
+          text: o.text,
+          done: this.doneObjectives.has(o.id) || isComplete(o.id, state),
+        }));
+      },
+      hasSave: () => {
+        try {
+          const raw = window.localStorage.getItem(SAVE_KEY);
+          if (!raw) return null;
+          const data = JSON.parse(raw) as { savedAt?: number };
+          return data.savedAt ? new Date(data.savedAt).toLocaleString() : null;
+        } catch {
+          return null;
+        }
+      },
       inspect: (tx: number, ty: number) => {
         const p = this.placed.find((q) => q.tx === tx && q.ty === ty);
         if (!p) return null;
