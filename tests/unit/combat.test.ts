@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyDamage, recruitCost, soldierDps, towerDps, waveSpec } from '@/game/systems/combat';
+import { applyDamage, attackReach, recruitCost, soldierDps, towerDps, VICTORY_WAVES, waveSpec } from '@/game/systems/combat';
 
 describe('combate', () => {
   it('las oleadas crecen y tienen tope', () => {
@@ -27,5 +27,13 @@ describe('combate', () => {
   it('reclutar encarece el pan con el ejercito', () => {
     expect(recruitCost(0).pan).toBe(1);
     expect(recruitCost(8).pan).toBeGreaterThan(1);
+  });
+
+  it('la victoria exige rechazar varias oleadas', () => {
+    expect(VICTORY_WAVES).toBeGreaterThanOrEqual(5);
+  });
+
+  it('el alcance a distancia supera al cuerpo a cuerpo', () => {
+    expect(attackReach(true)).toBeGreaterThan(attackReach(false));
   });
 });

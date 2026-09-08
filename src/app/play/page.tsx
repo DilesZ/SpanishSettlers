@@ -52,13 +52,17 @@ export default function PlayPage() {
   const [inspect, setInspect] = useState<Inspect | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [objectives, setObjectives] = useState<{ id: string; text: string; done: boolean }[]>([]);
+  const [ending, setEnding] = useState<{ status: string; wave: number; kills: number; buildings: number; timeSec: number } | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => {
       const w = window as unknown as {
         __stock?: Record<string, number>;
         __inspect?: Inspect | null;
-        __game?: { objectives: () => { id: string; text: string; done: boolean }[] };
+        __game?: {
+          objectives: () => { id: string; text: string; done: boolean }[];
+          status: () => { status: string; wave: number; kills: number; buildings: number; timeSec: number };
+        };
       };
       if (w.__stock) setStock({ ...w.__stock });
       if ('__inspect' in w) {
@@ -68,6 +72,9 @@ export default function PlayPage() {
       try {
         const objs = w.__game?.objectives();
         if (objs) setObjectives(objs);
+        const st = w.__game?.status();
+        if (st && st.status !== 'playing') setEnding(st);
+        else if (st) setEnding(null);
       } catch { /* juego aún arrancando */ }
     }, 1000);
     return () => clearInterval(t);
@@ -136,6 +143,33 @@ export default function PlayPage() {
       )}
 
       <div className="px-4"><GameCanvas /></div>
+
+      {ending && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="max-w-md rounded-2xl border border-amber-300/40 bg-[#141b12] p-8 text-center">
+            <div className="text-5xl">{ending.status === 'victory' ? '🏆' : '💀'}</div>
+            <h2 className="mt-2 text-2xl font-black">
+              {ending.status === 'victory' ? '¡Victoria!' : 'Derrota'}
+            </h2>
+            <p className="mt-2 text-sm text-white/70">
+              {ending.status === 'victory'
+                ? `Rechazaste ${ending.wave} oleadas y tu colonia perdura.`
+                : 'Tu almacén ha caído. La colonia se dispersa...'}
+            </p>
+            <div className="mt-3 flex justify-center gap-3 text-xs text-white/80">
+              <span>⚔ {ending.kills} bajas</span>
+              <span>🏠 {ending.buildings} edificios</span>
+              <span>⏱ {Math.floor(ending.timeSec / 60)}:{String(ending.timeSec % 60).padStart(2, '0')}</span>
+            </div>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-5 rounded-full bg-amber-300 px-6 py-2 text-sm font-bold text-black hover:bg-amber-200"
+            >
+              ↻ Jugar de nuevo
+            </button>
+          </div>
+        </div>
+      )}
 
       {objectives.length > 0 && (
         <section className="mx-4 mt-2 rounded-xl border border-white/10 bg-white/5 p-3 text-xs">

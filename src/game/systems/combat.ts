@@ -39,3 +39,11 @@ export function applyDamage(f: Fighter, dmg: number): boolean {
 export function recruitCost(count: number): { espada: number; pan: number } {
   return { espada: 1, pan: 1 + Math.floor(count / 4) };
 }
+
+/** Oleadas a rechazar para ganar la partida. */
+export const VICTORY_WAVES = 10;
+
+/** Alcance de ataque en losetas según sea a distancia o no. */
+export function attackReach(ranged: boolean): number {
+  return ranged ? 3.2 : 1.6;
+}

@@ -4,7 +4,7 @@ import { BUILDINGS, INITIAL_STOCK, RECIPES, type BuildingId, type ResourceId } f
 import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_RES_ICONS, WL_ROCKS, WL_SHIPS, WL_TREES, WL_WHEAT, WL_WHEAT_ORDER, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
 import { DAY_LENGTH_MS, skyAt } from '../systems/daynight';
 import { findPath, smoothPath, type GridPos } from '../systems/pathfinding';
-import { applyDamage, recruitCost, soldierDps, towerDps, waveSpec } from '../systems/combat';
+import { applyDamage, attackReach, recruitCost, soldierDps, towerDps, VICTORY_WAVES, waveSpec } from '../systems/combat';
 import { OBJECTIVES, isComplete } from '../systems/objectives';
 import { goodsFor, isNavigable, pickFishingCircuit, touchesWater } from '../systems/ships';
 import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
@@ -54,6 +54,8 @@ interface Enemy {
   hp: number;
   maxHp: number;
   dmg: number;
+  ranged: boolean;
+  base: 'soldier' | 'archer';
   path: GridPos[];
   targetPx: { x: number; y: number } | null;
   speed: number;
@@ -108,6 +110,8 @@ export class GameScene extends Phaser.Scene {
   private kills = 0;
   private wavesRepelled = 0;
   private doneObjectives = new Set<string>();
+  private gameStatus: 'playing' | 'victory' | 'defeat' = 'playing';
+  private startTime = 0;
 
   constructor() {
     super('game');
@@ -334,6 +338,7 @@ export class GameScene extends Phaser.Scene {
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.skyTick() });
     this.time.addEvent({ delay: 500, loop: true, callback: () => this.combatTick() });
     this.time.addEvent({ delay: 60000, loop: true, callback: () => this.saveGame(true) });
+    this.startTime = this.time.now;
     this.time.delayedCall(75000, () => this.spawnWave());
     this.time.addEvent({ delay: 100000, loop: true, callback: () => this.spawnWave() });
     this.scale.on('resize', () => this.layoutMinimap());
@@ -1040,6 +1045,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnWave() {
+    if (this.gameStatus !== 'playing') return;
     this.waveNo++;
     const spec = waveSpec(this.waveNo);
     // borde del mapa: loseta de tierra aleatoria en el perímetro
@@ -1052,17 +1058,22 @@ export class GameScene extends Phaser.Scene {
       return t !== 'water' && t !== 'waterB' && t !== 'waterC' && t !== 'mountain';
     });
     if (!land.length || !this.placed.length) return;
+    const archers = this.waveNo % 3 === 0 ? 2 : 0;
     for (let i = 0; i < spec.count; i++) {
       const s = land[Phaser.Math.Between(0, land.length - 1)];
       const { x, y } = this.iso(s.x, s.y);
-      const sprite = this.add.sprite(x, y - 15, 'wl-soldier-e', 0).setDepth(8000);
-      sprite.setTint(0x883333);
+      const ranged = i >= spec.count - archers;
+      const tex = ranged ? 'wl-archer-e' : 'wl-soldier-e';
+      const anim = ranged ? 'wl-walk-archer-e' : 'wl-walk-soldier-e';
+      const sprite = this.add.sprite(x, y - 15, tex, 0).setDepth(8000);
+      sprite.setTint(ranged ? 0x773377 : 0x883333);
       sprite.setScale(wlWorkerScale(WL_WORKERS.soldier?.dirs.e?.fh ?? 42));
-      sprite.play('wl-walk-soldier-e');
+      sprite.play(anim);
       const shadow = this.add.image(x, y - 1, 'shadow').setDepth(7999).setAlpha(0.6).setScale(1.2);
       const bar = this.add.graphics().setDepth(8200);
       const e: Enemy = {
         sprite, shadow, hp: spec.enemyHp, maxHp: spec.enemyHp, dmg: spec.enemyDmg,
+        ranged, base: ranged ? 'archer' : 'soldier',
         path: [], targetPx: null, speed: 60, target: null, attackT: 0, bar,
       };
       this.enemies.push(e);
@@ -1109,9 +1120,9 @@ export class GameScene extends Phaser.Scene {
           s.x += (dx / dist) * step;
           s.y += (dy / dist) * step;
           const dir = this.dir6(dx, dy);
-          const key = `wl-walk-soldier-${dir}`;
+          const key = `wl-walk-${e.base}-${dir}`;
           if (this.anims.exists(key)) {
-            s.setTexture(`wl-soldier-${dir}`);
+            s.setTexture(`wl-${e.base}-${dir}`);
             s.play(key, true);
           }
         }
@@ -1177,13 +1188,22 @@ export class GameScene extends Phaser.Scene {
       }
       const t = this.enemyTile(e);
       const dist = Math.hypot(t.x - e.target.x, t.y - e.target.y);
-      if (dist > 1.6) {
+      if (dist > attackReach(e.ranged)) {
         this.sendEnemy(e);
         continue;
       }
       e.attackT += 0.5;
       if (e.attackT < 1.5) continue;
       e.attackT = 0;
+      if (e.ranged) {
+        // flecha visible hacia el edificio
+        const p = this.placed.find((q) => q.tx === e.target!.x && q.ty === e.target!.y);
+        if (p) {
+          const { x: x1, y: y1 } = this.iso(e.target.x, e.target.y);
+          const arrow = this.add.circle(e.sprite.x, e.sprite.y - 20, 2.5, 0xc084fc, 1).setDepth(8600);
+          this.tweens.add({ targets: arrow, x: x1, y: y1 - 30, duration: 260, onComplete: () => arrow.destroy() });
+        }
+      }
       const key = `${e.target.x},${e.target.y}`;
       const rec = this.buildingHp.get(key) ?? { hp: 100, maxHp: 100, bar: this.add.graphics().setDepth(8600) };
       this.buildingHp.set(key, rec);
@@ -1221,9 +1241,15 @@ export class GameScene extends Phaser.Scene {
       this.stock.oro += 2;
       this.wavesRepelled++;
       this.updateHud();
-      this.hintText?.setText(`🛡 ¡Oleada ${this.waveNo} rechazada! +2 oro`).setY(44);
-      playSfx('confirm');
-      this.time.delayedCall(4000, () => this.hintText.setText(''));
+      if (this.wavesRepelled >= VICTORY_WAVES && this.gameStatus === 'playing') {
+        this.gameStatus = 'victory';
+        this.hintText?.setText(`🏆 ¡VICTORIA! Rechazaste ${VICTORY_WAVES} oleadas`).setY(44);
+        playSfx('built');
+      } else {
+        this.hintText?.setText(`🛡 ¡Oleada ${this.waveNo} rechazada! +2 oro`).setY(44);
+        playSfx('confirm');
+      }
+      this.time.delayedCall(6000, () => this.hintText.setText(''));
     }
   }
 
@@ -1316,6 +1342,7 @@ export class GameScene extends Phaser.Scene {
       this.kills = data.kills ?? 0;
       this.wavesRepelled = data.wavesRepelled ?? 0;
       this.doneObjectives = new Set(data.doneObjectives ?? []);
+      this.gameStatus = 'playing';
       for (const p of data.placed) {
         if (BUILDINGS[p.id]) this.tryPlace(p.id, p.tx, p.ty, true);
       }
@@ -1370,6 +1397,10 @@ export class GameScene extends Phaser.Scene {
     this.hintText?.setText(`🔥 ¡${BUILDINGS[p.id].nombre} destruido!`).setY(44);
     playSfx('error');
     this.time.delayedCall(4000, () => this.hintText.setText(''));
+    if (p.id === 'almacen' && this.gameStatus === 'playing') {
+      this.gameStatus = 'defeat';
+      this.hintText?.setText('💀 Sin almacén la colonia cae...').setY(44);
+    }
     this.updateHud();
   }
 
@@ -1802,6 +1833,7 @@ export class GameScene extends Phaser.Scene {
         save: () => string | null;
         load: () => boolean;
         hasSave: () => string | null;
+        status: () => { status: string; wave: number; kills: number; buildings: number; timeSec: number };
         objectives: () => { id: string; text: string; done: boolean }[];
         inspect: (tx: number, ty: number) => {
           id: BuildingId; nombre: string; descripcion: string; categoria: string;
@@ -1820,6 +1852,13 @@ export class GameScene extends Phaser.Scene {
       recruit: () => this.recruit(),
       save: () => this.saveGame(),
       load: () => this.loadGame(),
+      status: () => ({
+        status: this.gameStatus,
+        wave: this.waveNo,
+        kills: this.kills,
+        buildings: this.placed.length,
+        timeSec: Math.floor((this.time.now - this.startTime) / 1000),
+      }),
       objectives: () => {
         const army = this.walkers.filter((x) => x.kind === 'settler' && (x.role === 'soldier' || x.role === 'archer')).length;
         const state = {
