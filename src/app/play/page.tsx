@@ -9,9 +9,9 @@ import { BUILDINGS, type BuildingId, type ResourceId } from '@/game/data/buildin
 // Dynamic import: el canvas pesado solo en cliente (skill bundle-dynamic-imports).
 const GameCanvas = dynamic(() => import('@/components/GameCanvas'), { ssr: false });
 
-// Pack de arte por proyecto Vercel (NEXT_PUBLIC_PACK=a|b). En 'a' no hay puerto.
-// Los <img> llevan fallback cruzado para que dev sin env también funcione.
-const PACK = process.env.NEXT_PUBLIC_PACK === 'b' ? 'b' : 'a';
+// Pack de arte por proyecto Vercel (NEXT_PUBLIC_PACK=a|b). En local (sin env)
+// se usa 'b' (arte wl commiteado) para evitar 404s con fallback parpadeante.
+const PACK = process.env.NEXT_PUBLIC_PACK === 'a' ? 'a' : 'b';
 
 const ORDER: BuildingId[] = [
   'cabanaLenador', 'aserradero', 'cantera', 'residenciaS', 'residenciaM', 'residenciaL',
@@ -45,12 +45,35 @@ interface Inspect {
   categoria: string;
   receta?: { in: [string, number][]; out: [string, number][] };
   produciendo: boolean;
+  faltan?: string[];
+  bando: 'tuya' | 'rival';
 }
+
+interface Stall {
+  id: BuildingId;
+  nombre: string;
+  tx: number;
+  ty: number;
+  faltan: string[];
+}
+
+interface Pop {
+  pop: number;
+  cap: number;
+  morale: number;
+  eating: number;
+}
+
+const moraleFace = (m: number) => (m >= 75 ? '😊' : m >= 50 ? '🙂' : m >= 35 ? '😐' : '😟');
 
 export default function PlayPage() {
   const [stock, setStock] = useState<Record<string, number> | null>(null);
   const [selected, setSelected] = useState<BuildingId | null>(null);
+  const [roadMode, setRoadMode] = useState(false);
   const [inspect, setInspect] = useState<Inspect | null>(null);
+  const [stalls, setStalls] = useState<Stall[]>([]);
+  const [pop, setPop] = useState<Pop | null>(null);
+  const [rival, setRival] = useState<number | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [music, setMusic] = useState(true);
   const [objectives, setObjectives] = useState<{ id: string; text: string; done: boolean }[]>([]);
@@ -63,7 +86,9 @@ export default function PlayPage() {
         __inspect?: Inspect | null;
         __game?: {
           objectives: () => { id: string; text: string; done: boolean }[];
-          status: () => { status: string; wave: number; kills: number; buildings: number; timeSec: number };
+          status: () => { status: string; wave: number; kills: number; buildings: number; timeSec: number; rival: number; aiBase: { x: number; y: number } | null; ai: { espada: number; pan: number; hierro: number; carbon: number; lingote: number; troops: number; raids: number } };
+          stalls: () => Stall[];
+          pop: () => Pop;
         };
       };
       if (w.__stock) setStock({ ...w.__stock });
@@ -77,6 +102,11 @@ export default function PlayPage() {
         const st = w.__game?.status();
         if (st && st.status !== 'playing') setEnding(st);
         else if (st) setEnding(null);
+        if (st) setRival(st.rival);
+        const sl = w.__game?.stalls();
+        if (sl) setStalls(sl);
+        const pp = w.__game?.pop();
+        if (pp) setPop(pp);
       } catch { /* juego aún arrancando */ }
     }, 1000);
     return () => clearInterval(t);
@@ -85,6 +115,7 @@ export default function PlayPage() {
   const game = () => (window as unknown as {
     __game?: {
       place: (id: BuildingId) => void;
+      road: () => void;
       save: () => string | null;
       load: () => boolean;
       hasSave: () => string | null;
@@ -118,6 +149,16 @@ export default function PlayPage() {
     playSfx('click');
     game()?.place(id);
     setSelected(id);
+    setRoadMode(false);
+    setInspect(null);
+  };
+
+  const startRoad = () => {
+    unlockAudio();
+    playSfx('click');
+    game()?.road();
+    setRoadMode(true);
+    setSelected(null);
     setInspect(null);
   };
 
@@ -203,17 +244,59 @@ export default function PlayPage() {
         </section>
       )}
 
+      {pop && (
+        <section className="mx-4 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs">
+          <span title="Población / vivienda" className={pop.pop >= pop.cap ? 'font-bold text-red-300' : 'text-white/85'}>
+            👥 {pop.pop}/{pop.cap}
+          </span>
+          <span title="Moral de la colonia" className="text-white/85">
+            {moraleFace(pop.morale)} {pop.morale}
+          </span>
+          <span title="Comida consumida por segundo" className="text-white/60">
+            🍞 −{pop.eating.toFixed(1)}/s
+          </span>
+          {pop.pop >= pop.cap && (
+            <span className="font-semibold text-red-300">⚠ Sin vivienda: no crece</span>
+          )}
+          {stock && (stock.pan ?? 0) + (stock.pez ?? 0) <= 0.5 && (
+            <span className="font-semibold text-red-300">⚠ Sin comida: hambre</span>
+          )}
+        </section>
+      )}
+
+      {stalls.length > 0 && (
+        <section className="mx-4 mt-2 rounded-xl border border-red-400/40 bg-red-500/10 p-3 text-xs">
+          <div className="mb-1 font-bold text-red-200">⚠ Producción parada ({stalls.length})</div>
+          <div className="flex flex-wrap gap-2">
+            {stalls.map((s) => (
+              <span key={`${s.tx},${s.ty}`} className="rounded-full bg-red-900/40 px-2 py-1 text-red-100">
+                {s.nombre}: falta {s.faltan.join(', ') || '—'}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+
       {inspect && (
         <section className="mx-4 mt-2 flex items-center gap-3 rounded-xl border border-amber-300/40 bg-amber-300/10 p-3 text-sm">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={iconFor(inspect.id)} alt="" width={40} height={40} className="h-10 w-10 rounded bg-black/40" onError={onImgFallback(iconFallback(inspect.id))} />
           <div className="flex-1">
-            <div className="font-bold">{inspect.nombre} <span className="ml-1 rounded bg-white/10 px-1 text-[10px] text-white/60">{inspect.categoria}</span></div>
+            <div className="font-bold">{inspect.nombre} <span className="ml-1 rounded bg-white/10 px-1 text-[10px] text-white/60">{inspect.categoria}</span>
+              {inspect.bando === 'rival' && (
+                <span className="ml-1 rounded bg-red-500/30 px-1 text-[10px] font-bold text-red-200">⚔ Rival</span>
+              )}
+            </div>
             <div className="text-white/70">{inspect.descripcion}</div>
             {inspect.receta && (
               <div className="mt-1 text-amber-200/90">
                 Produce: {inspect.receta.in.map(([k, v]) => `${v}×${k}`).join(' + ') || '—'} → {inspect.receta.out.map(([k, v]) => `${v}×${k}`).join(' + ')}
                 {inspect.produciendo ? ' ●' : ' ○'}
+              </div>
+            )}
+            {inspect.faltan && inspect.faltan.length > 0 && (
+              <div className="mt-1 font-semibold text-red-300">
+                ⚠ Parado: falta {inspect.faltan.join(', ')}
               </div>
             )}
             {inspect.id === 'cuartel' && (
@@ -234,7 +317,23 @@ export default function PlayPage() {
       )}
 
       <section className="px-4 py-3">
-        <h2 className="mb-2 text-sm font-semibold text-amber-200">Construir {selected ? `→ ${BUILDINGS[selected].nombre} (clic en una loseta)` : '(elige un edificio)'}</h2>
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <h2 className="text-sm font-semibold text-amber-200">
+            Construir {selected ? `→ ${BUILDINGS[selected].nombre} (clic en una loseta)` : roadMode ? '→ Camino (clic o arrastra, ESC termina)' : '(elige un edificio)'}
+          </h2>
+          <button
+            onClick={startRoad}
+            title="Traza caminos: los colonos los prefieren y van más rápido por ellos"
+            className={`rounded-full border px-3 py-1 text-xs font-bold transition ${roadMode ? 'border-amber-300 bg-amber-300/20 text-amber-100' : 'border-white/15 bg-white/5 text-white/80 hover:bg-white/10'}`}
+          >
+            🛤 Camino
+          </button>
+          {rival !== null && rival > 0 && (
+            <span title="Edificios de la colonia rival" className="rounded-full border border-red-400/40 bg-red-500/10 px-3 py-1 text-xs font-bold text-red-200">
+              ⚔ Rival: {rival}
+            </span>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
           {ORDER.map((id) => (
             <button

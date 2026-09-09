@@ -45,4 +45,17 @@ describe('A* colonos', () => {
     expect(s[0]).toEqual({ x: 0, y: 1 });
     expect(s[s.length - 1]).toEqual({ x: 2, y: 2 });
   });
+
+  it('coste ponderado: prefiere el camino aunque sea más largo', () => {
+    // Corredor barato por y=2 frente a la recta por y=0 (cara).
+    const costFn = (_x: number, y: number) => (y === 2 ? 1 : 10);
+    const p = findPath({ x: 0, y: 0 }, { x: 4, y: 0 }, 5, 3, free, 4000, costFn);
+    expect(p).not.toBeNull();
+    expect(p!.some((n) => n.y === 2)).toBe(true);
+  });
+
+  it('sin costFn el comportamiento no cambia (coste uniforme)', () => {
+    const p = findPath({ x: 0, y: 0 }, { x: 3, y: 0 }, W, H, free);
+    expect(p).toEqual([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }, { x: 3, y: 0 }]);
+  });
 });

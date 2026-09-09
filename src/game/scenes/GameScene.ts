@@ -8,7 +8,10 @@ import { applyDamage, attackReach, recruitCost, soldierDps, towerDps, VICTORY_WA
 import { OBJECTIVES, isComplete } from '../systems/objectives';
 import { goodsFor, isNavigable, pickFishingCircuit, touchesWater } from '../systems/ships';
 import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
-import { tickJob, type ProductionJob, type Stock } from '../systems/economy';
+import { missingInputs, payCost, tickAutoProducers, tickJob, type ProductionJob, type Stock } from '../systems/economy';
+import { foodPerTick, growthPerTick, housingFor, moraleOf } from '../systems/population';
+import { findRivalBase, lateRivalBuild, nextRivalBuild, rivalStartingStock, RIVAL_ORDER, type Owner } from '../systems/rival';
+import { addRoad, createRoadNet, deserializeRoads, hasRoad, removeRoad, roadNeighbors, serializeRoads, tileCost, ROAD_SPEED_BONUS, type RoadNet } from '../systems/roads';
 
 // Rama B: arte GPL de Widelands (ver docs/ATRIBUCION.md + wlArt.ts).
 const WL_TEX: Record<BuildingId, string> = {
@@ -25,7 +28,7 @@ const WL_TEX: Record<BuildingId, string> = {
 const WL_SMOKE: Set<BuildingId> = new Set(['fundicion', 'herreria', 'panaderia', 'minaCarbon', 'minaHierro', 'minaOro', 'cabanaLenador']);
 const MAP = ISLAND_SIZE;
 
-interface Placed { id: BuildingId; tx: number; ty: number; sprite: Phaser.GameObjects.Container; done: number; total: number }
+interface Placed { id: BuildingId; tx: number; ty: number; sprite: Phaser.GameObjects.Container; done: number; total: number; owner: Owner }
 
 type WlDir6 = 'e' | 'se' | 'sw' | 'w' | 'nw' | 'ne';
 
@@ -34,6 +37,8 @@ interface Walker {
   shadow: Phaser.GameObjects.Image;
   role: string;
   kind: 'settler' | 'critter';
+  /** Bando: los colonos del rival deambulan su base (Fase 4). */
+  faction: Owner;
   path: GridPos[];
   targetPx: { x: number; y: number } | null;
   speed: number;
@@ -56,6 +61,9 @@ interface Enemy {
   dmg: number;
   ranged: boolean;
   base: 'soldier' | 'archer';
+  /** Incursores neutrales o tropas del rival (guarnición o incursión). */
+  side: 'raider' | 'rival';
+  mode: 'raid' | 'garrison';
   path: GridPos[];
   targetPx: { x: number; y: number } | null;
   speed: number;
@@ -89,10 +97,26 @@ export class GameScene extends Phaser.Scene {
   ships: Ship[] = [];
   buildingTiles = new Set<string>();
   pendingBuild: BuildingId | null = null;
+  /** Modo herramienta camino: clic alterna, arrastrar pinta, ESC cancela. */
+  pendingRoad = false;
+  roads: RoadNet = createRoadNet();
+  private roadDecals = new Map<string, Phaser.GameObjects.Container>();
+  /** Avisos de producción bloqueada por edificio ("x,y" → recursos que faltan). */
+  private stallInfo = new Map<string, ResourceId[]>();
+  private stallMarks = new Map<string, Phaser.GameObjects.Text>();
+  // ---------- Población (Fase 3): techo real, comida, moral y crecimiento ----------
+  private popCount = 20;
+  private popProgress = 0;
+  private foodAcc = 0;
+  private morale = 80;
+  // ---------- Rival (Fase 4): colonia IA con sus propias reglas ----------
+  private aiStock: Stock = rivalStartingStock();
+  private aiCenter: GridPos | null = null;
+  private aiRaidT = 0;
+  private aiRaids = 0;
   territoryRadius = 7;
   center = { x: MAP / 2, y: MAP / 2 };
   jobs: ProductionJob[] = [];
-  private hudText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
   private waterCells: { x: number; y: number; alt: boolean }[] = [];
@@ -112,6 +136,12 @@ export class GameScene extends Phaser.Scene {
   private doneObjectives = new Set<string>();
   private gameStatus: 'playing' | 'victory' | 'defeat' = 'playing';
   private startTime = 0;
+  /** Economía con reloj de pared (Fase 2): el tick de simulación no depende
+   *  de los FPS (a pocos FPS el reloj de Phaser dilata el tiempo y la
+   *  economía se paraba). Acumulador en update() con tope anti-espiral. */
+  private econAcc = 0;
+  private econLast = 0;
+  private econTickNo = 0;
 
   constructor() {
     super('game');
@@ -333,6 +363,7 @@ export class GameScene extends Phaser.Scene {
     this.setupInput();
     this.placeFromLogicLayer();
     this.placeExtraInitial();
+    this.setupRival();
     this.spawnPopulation();
     this.spawnCritters();
     this.setupAmbient();
@@ -340,7 +371,7 @@ export class GameScene extends Phaser.Scene {
     this.setupMapFrame();
     this.setupParticles();
     this.exposeBridge();
-    this.time.addEvent({ delay: 1000, loop: true, callback: () => this.tickEconomy() });
+    this.econLast = performance.now();
     this.time.addEvent({ delay: 700, loop: true, callback: () => this.animateWater() });
     this.time.addEvent({ delay: 6000, loop: true, callback: () => this.wheatTick() });
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.skyTick() });
@@ -558,9 +589,19 @@ export class GameScene extends Phaser.Scene {
   private setupCamera() {
     const cam = this.cameras.main;
     cam.setZoom(0.7);
-    cam.centerOn(0, 450);
-    this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
-      cam.setZoom(Phaser.Math.Clamp(cam.zoom * (dy > 0 ? 0.9 : 1.1), 0.3, 2));
+    this.zoomTarget = 0.7;
+    const home = this.iso(this.center.x, this.center.y);
+    cam.centerOn(home.x, home.y);
+    cam.fadeIn(600);
+    // Zoom suave hacia el cursor (rueda = objetivo, update() interpola).
+    this.input.on('wheel', (p: Phaser.Input.Pointer, _o: unknown, _dx: number, dy: number) => {
+      this.zoomTarget = Phaser.Math.Clamp(this.zoomTarget * (dy > 0 ? 0.9 : 1.1), 0.35, 2);
+      // Anclar el zoom al cursor: compensar el scroll para que el punto bajo
+      // el ratón permanezca estable durante la interpolación.
+      try {
+        const before = cam.getWorldPoint(p.x, p.y);
+        this.zoomAnchor = { sx: p.x, sy: p.y, wx: before.x, wy: before.y };
+      } catch { this.zoomAnchor = null; }
     });
     let dragging = false;
     let last = { x: 0, y: 0 };
@@ -569,7 +610,7 @@ export class GameScene extends Phaser.Scene {
       else if (p.leftButtonDown()) {
         if (this.minimap && this.inMinimap(p.x, p.y)) {
           const wp = this.minimap.getWorldPoint(p.x, p.y);
-          cam.centerOn(wp.x, wp.y);
+          this.panTarget = { x: wp.x, y: wp.y };
           return;
         }
         const wx = p.worldX;
@@ -579,7 +620,15 @@ export class GameScene extends Phaser.Scene {
       }
     });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (p.x >= 0 && p.y >= 0 && p.x <= this.scale.width && p.y <= this.scale.height) this.edgeArmed = true;
       if (dragging && p.isDown) { cam.scrollX -= (p.x - last.x) / cam.zoom; cam.scrollY -= (p.y - last.y) / cam.zoom; last = { x: p.x, y: p.y }; }
+      // Pintar caminos arrastrando con el botón izquierdo.
+      if (this.pendingRoad && p.leftButtonDown()) {
+        const dt2 = this.groundLayer.worldToTileXY(p.worldX, p.worldY);
+        if (dt2 && dt2.x >= 0 && dt2.y >= 0 && dt2.x < MAP && dt2.y < MAP) {
+          this.tryAddRoad(Math.round(dt2.x), Math.round(dt2.y));
+        }
+      }
       if (!p.isDown) {
         const t = this.groundLayer.worldToTileXY(p.worldX, p.worldY);
         if (t && t.x >= 0 && t.y >= 0 && t.x < MAP && t.y < MAP) {
@@ -596,12 +645,12 @@ export class GameScene extends Phaser.Scene {
     this.input.mouse?.disableContextMenu();
     this.cameras.main.setBounds(-2200, -600, 4400, 3200);
 
-    this.hudText = this.add.text(12, 10, '', { fontSize: '12px', color: '#fff', backgroundColor: '#00000099', padding: { x: 8, y: 6 } })
-      .setScrollFactor(0).setDepth(9950);
-    this.hintText = this.add.text(12, 0, '', { fontSize: '12px', color: '#fde68a', backgroundColor: '#00000099', padding: { x: 8, y: 6 } })
+    // La barra de recursos vive en React (/play). En Phaser solo avisos.
+    this.hintText = this.add.text(12, 12, '', { fontSize: '13px', color: '#fde68a', backgroundColor: '#000000aa', padding: { x: 10, y: 7 } })
       .setScrollFactor(0).setDepth(9950);
 
-    this.minimap = this.cameras.add(0, 0, 190, 140).setZoom(0.055).centerOn(0, 450);
+    const homeMm = this.iso(this.center.x, this.center.y);
+    this.minimap = this.cameras.add(0, 0, 190, 140).setZoom(0.055).centerOn(homeMm.x, homeMm.y);
     this.minimap.setBackgroundColor('#0d1f16');
     this.layoutMinimap();
   }
@@ -621,7 +670,17 @@ export class GameScene extends Phaser.Scene {
     return sx >= vx && sx <= vx + 190 && sy >= vy && sy <= vy + 140;
   }
 
-  private wasd?: { W: Phaser.Input.Keyboard.Key; A: Phaser.Input.Keyboard.Key; S: Phaser.Input.Keyboard.Key; D: Phaser.Input.Keyboard.Key };
+  private wasd?: { W: Phaser.Input.Keyboard.Key; A: Phaser.Input.Keyboard.Key; S: Phaser.Input.Keyboard.Key; D: Phaser.Input.Keyboard.Key; Q: Phaser.Input.Keyboard.Key; E: Phaser.Input.Keyboard.Key };
+  private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
+  private camVel = { x: 0, y: 0 };
+  private zoomTarget = 0.7;
+  private zoomAnchor: { sx: number; sy: number; wx: number; wy: number } | null = null;
+  /** Paneado suave manual (los efectos pan de cámara resultaron poco
+   *  fiables junto al control por velocidad: se interpola en update). */
+  private panTarget: { x: number; y: number } | null = null;
+  /** Edge-scroll solo tras un movimiento real del puntero (el puntero
+   *  sintético inicial en (0,0) no debe expulsar la cámara al arrancar). */
+  private edgeArmed = false;
   private ghost?: Phaser.GameObjects.Image | null;
   private selectRing?: Phaser.GameObjects.Graphics | null;
   private mapFrame?: Phaser.GameObjects.Graphics | null;
@@ -629,11 +688,13 @@ export class GameScene extends Phaser.Scene {
   private setupInput() {
     this.input.keyboard?.on('keydown-ESC', () => {
       this.pendingBuild = null;
+      this.pendingRoad = false;
       this.hintText?.setText('');
       this.clearGhost();
     });
     if (this.input.keyboard) {
-      this.wasd = this.input.keyboard.addKeys('W,A,S,D') as { W: Phaser.Input.Keyboard.Key; A: Phaser.Input.Keyboard.Key; S: Phaser.Input.Keyboard.Key; D: Phaser.Input.Keyboard.Key };
+      this.wasd = this.input.keyboard.addKeys('W,A,S,D,Q,E') as { W: Phaser.Input.Keyboard.Key; A: Phaser.Input.Keyboard.Key; S: Phaser.Input.Keyboard.Key; D: Phaser.Input.Keyboard.Key; Q: Phaser.Input.Keyboard.Key; E: Phaser.Input.Keyboard.Key };
+      this.cursors = this.input.keyboard.createCursorKeys();
     }
   }
 
@@ -679,6 +740,76 @@ export class GameScene extends Phaser.Scene {
   private adjacentWater(tx: number, ty: number): boolean {
     const at = (ax: number, ay: number) => (ax < 0 || ay < 0 || ax >= MAP || ay >= MAP ? null : terrainAt(ax, ay));
     return touchesWater(tx, ty, at);
+  }
+
+  // ---------- Caminos (Fase 2): red pintable que acelera y guía a los colonos ----------
+  private canRoad(tx: number, ty: number): boolean {
+    tx = Math.round(tx);
+    ty = Math.round(ty);
+    if (tx < 1 || ty < 1 || tx >= MAP - 1 || ty >= MAP - 1) return false;
+    if (this.buildingTiles.has(`${tx},${ty}`)) return false;
+    const t = terrainAt(tx, ty);
+    return t !== 'water' && t !== 'waterB' && t !== 'waterC' && t !== 'mountain';
+  }
+
+  /** Pinta un tramo si es válido (idempotente, para arrastrar). */
+  private tryAddRoad(tx: number, ty: number): boolean {
+    tx = Math.round(tx);
+    ty = Math.round(ty);
+    if (hasRoad(this.roads, tx, ty) || !this.canRoad(tx, ty)) return false;
+    const net = this.roads;
+    addRoad(net, tx, ty);
+    this.renderRoadTile(tx, ty);
+    for (const nb of roadNeighbors(net, tx, ty)) this.renderRoadTile(nb.x, nb.y);
+    return true;
+  }
+
+  /** Clic con la herramienta: alterna (pone o quita). */
+  private toggleRoad(tx: number, ty: number): void {
+    tx = Math.round(tx);
+    ty = Math.round(ty);
+    if (hasRoad(this.roads, tx, ty)) {
+      removeRoad(this.roads, tx, ty);
+      this.roadDecals.get(`${tx},${ty}`)?.destroy();
+      this.roadDecals.delete(`${tx},${ty}`);
+      for (const nb of roadNeighbors(this.roads, tx, ty)) this.renderRoadTile(nb.x, nb.y);
+      playSfx('click');
+      return;
+    }
+    if (!this.tryAddRoad(tx, ty)) {
+      this.hintText.setText('⛔ El camino no va en agua, montaña ni edificios').setY(44);
+      playSfx('error');
+      this.time.delayedCall(1500, () => this.hintText.setText(''));
+      return;
+    }
+    playSfx('click');
+  }
+
+  /** Decal de tierra conectada a sus vecinos (base + salientes orientados). */
+  private renderRoadTile(tx: number, ty: number): void {
+    const k = `${tx},${ty}`;
+    this.roadDecals.get(k)?.destroy();
+    const { x, y } = this.iso(tx, ty);
+    const parts: Phaser.GameObjects.Image[] = [];
+    // Base oscura (borde visible en hierba Y en tierra) + núcleo claro.
+    const rim = this.add.image(0, 8, 'pathdot').setScale(6.6, 4.2).setAlpha(0.8).setTint(0x7a5c38);
+    const core = this.add.image(0, 8, 'pathdot').setScale(5.6, 3.5).setAlpha(0.9);
+    parts.push(rim, core);
+    for (const nb of roadNeighbors(this.roads, tx, ty)) {
+      // Desplazamiento en pantalla hacia la loseta vecina (diamante 132x66).
+      const dx = (nb.x - tx - (nb.y - ty)) * (TILE_W / 2);
+      const dy = (nb.x - tx + (nb.y - ty)) * (TILE_H / 2);
+      const ang = Math.atan2(dy, dx);
+      const stubRim = this.add.image(dx / 2, 8 + dy / 2, 'pathdot')
+        .setScale(3.2, 2.0).setAlpha(0.8).setTint(0x7a5c38)
+        .setRotation(ang);
+      const stub = this.add.image(dx / 2, 8 + dy / 2, 'pathdot')
+        .setScale(2.6, 1.6).setAlpha(0.9)
+        .setRotation(ang);
+      parts.push(stubRim, stub);
+    }
+    const c = this.add.container(x, y, parts).setDepth(90);
+    this.roadDecals.set(k, c);
   }
 
   /** Hojas, brasas y salpicaduras ambientales (vida sin coste de CPU). */
@@ -729,7 +860,7 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /** Anillo pulsante sobre el edificio inspeccionado. */
+  /** Anillo pulsante sobre el edificio inspeccionado + foco suave de cámara. */
   private showSelectRing(tx: number, ty: number) {
     this.selectRing?.destroy();
     const { x, y } = this.iso(tx, ty);
@@ -738,6 +869,7 @@ export class GameScene extends Phaser.Scene {
     g.strokeEllipse(x, y - 10, 110, 44);
     this.tweens.add({ targets: g, alpha: 0.35, duration: 600, yoyo: true, repeat: -1 });
     this.selectRing = g;
+    this.panTarget = { x, y };
   }
 
   private hideSelectRing() {
@@ -782,7 +914,7 @@ export class GameScene extends Phaser.Scene {
       this.stars.push(st);
     }
     if (this.minimap) {
-      this.minimap.ignore([this.hudText, this.hintText]);
+      this.minimap.ignore([this.hintText, ...this.stars]);
     }
     this.skyTick();
   }
@@ -925,9 +1057,9 @@ export class GameScene extends Phaser.Scene {
     return { x: Phaser.Math.Clamp(t?.x ?? this.center.x, 0, MAP - 1), y: Phaser.Math.Clamp(t?.y ?? this.center.y, 0, MAP - 1) };
   }
 
-  private makeWalker(sprite: Phaser.GameObjects.Sprite, shadow: Phaser.GameObjects.Image, role: string, kind: 'settler' | 'critter'): Walker {
+  private makeWalker(sprite: Phaser.GameObjects.Sprite, shadow: Phaser.GameObjects.Image, role: string, kind: 'settler' | 'critter', faction: Owner = 'player'): Walker {
     const w: Walker = {
-      sprite, shadow, role, kind, path: [], targetPx: null,
+      sprite, shadow, role, kind, faction, path: [], targetPx: null,
       speed: kind === 'critter' ? 55 : 68, state: 'idle', stateT: Math.random() * 1.5,
       onArrive: null, loaded: false, goods: null, goodsIcon: null,
       hp: 30, maxHp: 30, foe: null,
@@ -940,7 +1072,9 @@ export class GameScene extends Phaser.Scene {
     const from = this.walkerTile(w);
     const allowWater = w.kind === 'critter' && w.role === 'duck';
     const blocked = (x: number, y: number) => this.tileBlocked(x, y, tx, ty, allowWater);
-    const raw = findPath(from, { x: tx, y: ty }, MAP, MAP, blocked);
+    // Los colonos prefieren los caminos (A* ponderado); la fauna deambula libre.
+    const costFn = w.kind === 'critter' ? undefined : (x: number, y: number) => tileCost(this.roads, x, y);
+    const raw = findPath(from, { x: tx, y: ty }, MAP, MAP, blocked, 4000, costFn);
     if (!raw || raw.length < 2) {
       w.state = 'idle';
       w.stateT = 0.5 + Math.random();
@@ -1040,7 +1174,12 @@ export class GameScene extends Phaser.Scene {
       const dx = w.targetPx.x - s.x;
       const dy = w.targetPx.y - s.y;
       const dist = Math.hypot(dx, dy);
-      const step = w.speed * dt;
+      // Bonus de velocidad sobre caminos (los colonos vuelan por la red vial).
+      let step = w.speed * dt;
+      if (w.kind === 'settler') {
+        const t = this.groundLayer.worldToTileXY(s.x, s.y);
+        if (t && hasRoad(this.roads, t.x, t.y)) step *= ROAD_SPEED_BONUS;
+      }
       if (dist <= Math.max(4, step)) {
         s.x = w.targetPx.x;
         s.y = w.targetPx.y;
@@ -1197,10 +1336,12 @@ export class GameScene extends Phaser.Scene {
     bar.fillRect(x - 15, y + 1, 30 * Math.max(0, frac), 3);
   }
 
-  private nearestBuilding(tx: number, ty: number): Placed | null {
+  /** Edificio más cercano de un bando (los incursores solo ven al jugador). */
+  private nearestBuilding(tx: number, ty: number, owner: Owner = 'player'): Placed | null {
     let best: Placed | null = null;
     let bestD = Infinity;
     for (const p of this.placed) {
+      if (p.owner !== owner) continue;
       const d = Math.hypot(p.tx - tx, p.ty - ty);
       if (d < bestD) { bestD = d; best = p; }
     }
@@ -1236,7 +1377,7 @@ export class GameScene extends Phaser.Scene {
       const bar = this.add.graphics().setDepth(8200);
       const e: Enemy = {
         sprite, shadow, hp: spec.enemyHp, maxHp: spec.enemyHp, dmg: spec.enemyDmg,
-        ranged, base: ranged ? 'archer' : 'soldier',
+        ranged, base: ranged ? 'archer' : 'soldier', side: 'raider', mode: 'raid',
         path: [], targetPx: null, speed: 60, target: null, attackT: 0, bar,
       };
       this.enemies.push(e);
@@ -1323,7 +1464,7 @@ export class GameScene extends Phaser.Scene {
     }
     // soldados propios traban combate cuerpo a cuerpo (radio ~1.2 losetas)
     for (const w of this.walkers) {
-      if (w.kind !== 'settler' || (w.role !== 'soldier' && w.role !== 'archer')) continue;
+      if (w.kind !== 'settler' || w.faction !== 'player' || (w.role !== 'soldier' && w.role !== 'archer')) continue;
       if (!w.sprite.active) continue;
       const wt = this.walkerTile(w);
       let best: Enemy | null = null;
@@ -1340,11 +1481,31 @@ export class GameScene extends Phaser.Scene {
         // represalia del incursor
         w.hp -= best.dmg * 0.5;
         if (w.hp <= 0) this.killWalker(w);
+        continue;
+      }
+      // Sin enemigo cerca: asedian el edificio rival adyacente.
+      let targetB: Placed | null = null;
+      let targetD = 1.8;
+      for (const p of this.placed) {
+        if (p.owner !== 'rival') continue;
+        const d = Math.hypot(p.tx - wt.x, p.ty - wt.y);
+        if (d < targetD) { targetD = d; targetB = p; }
+      }
+      if (targetB) {
+        const key = `${targetB.tx},${targetB.ty}`;
+        const rec = this.buildingHp.get(key) ?? { hp: 120, maxHp: 120, bar: this.add.graphics().setDepth(8600) };
+        this.buildingHp.set(key, rec);
+        if (applyDamage(rec, soldierDps(1) * 0.5)) {
+          this.destroyBuilding(targetB.tx, targetB.ty);
+        } else {
+          const { x, y } = this.iso(targetB.tx, targetB.ty);
+          this.drawBar(rec.bar, x, y - 80, rec.hp / rec.maxHp, 0xfbbf24);
+        }
       }
     }
-    // incursores golpean edificios adyacentes
+    // incursores golpean edificios adyacentes (la guarnición rival espera)
     for (const e of this.enemies) {
-      if (!e.sprite.active || e.targetPx) continue;
+      if (!e.sprite.active || e.targetPx || e.mode !== 'raid') continue;
       if (!e.target) {
         this.sendEnemy(e);
         continue;
@@ -1417,9 +1578,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private checkObjectives() {
-    const army = this.walkers.filter((w) => w.kind === 'settler' && (w.role === 'soldier' || w.role === 'archer')).length;
+    const army = this.walkers.filter((w) => w.kind === 'settler' && w.faction === 'player' && (w.role === 'soldier' || w.role === 'archer')).length;
     const state = {
-      buildings: this.placed.map((p) => p.id),
+      buildings: this.placed.filter((p) => p.owner === 'player').map((p) => p.id),
       army,
       wavesRepelled: this.wavesRepelled,
     };
@@ -1438,6 +1599,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private killWalker(w: Walker) {
+    if (w.kind === 'settler' && w.faction === 'player') this.popCount = Math.max(0, this.popCount - 1);
     this.tweens.add({ targets: w.sprite, alpha: 0, duration: 300, onComplete: () => w.sprite.destroy() });
     w.shadow.destroy();
     w.goodsIcon?.destroy();
@@ -1447,10 +1609,13 @@ export class GameScene extends Phaser.Scene {
   private saveGame(silent = false): string | null {
     try {
       const data = {
-        v: 1,
+        v: 4,
         savedAt: Date.now(),
         stock: this.stock,
-        placed: this.placed.map((p) => ({ id: p.id, tx: p.tx, ty: p.ty })),
+        aiStock: this.aiStock,
+        placed: this.placed.map((p) => ({ id: p.id, tx: p.tx, ty: p.ty, owner: p.owner })),
+        roads: serializeRoads(this.roads),
+        pop: { count: this.popCount, progress: this.popProgress, morale: this.morale },
         waveNo: this.waveNo,
         kills: this.kills,
         wavesRepelled: this.wavesRepelled,
@@ -1469,12 +1634,17 @@ export class GameScene extends Phaser.Scene {
       const raw = window.localStorage.getItem(SAVE_KEY);
       if (!raw) return false;
       const data = JSON.parse(raw) as {
-        stock: Stock; placed: { id: BuildingId; tx: number; ty: number }[];
+        stock: Stock; placed: { id: BuildingId; tx: number; ty: number; owner?: Owner }[];
+        roads?: string[];
+        aiStock?: Stock;
+        pop?: { count?: number; progress?: number; morale?: number };
         waveNo: number; kills: number; wavesRepelled?: number; doneObjectives?: string[];
       };
       if (!data || !Array.isArray(data.placed)) return false;
       // limpiar mundo
       for (const p of this.placed) p.sprite.destroy();
+      for (const d of this.roadDecals.values()) d.destroy();
+      for (const m of this.stallMarks.values()) m.destroy();
       for (const w of this.walkers) {
         w.sprite.destroy();
         w.shadow.destroy();
@@ -1497,20 +1667,55 @@ export class GameScene extends Phaser.Scene {
       this.lanterns = [];
       this.buildingHp.clear();
       this.buildingTiles.clear();
+      this.roadDecals.clear();
+      this.stallMarks.clear();
+      this.stallInfo.clear();
       this.jobs = [];
       this.territoryRadius = 7;
       // restaurar
       this.stock = { ...data.stock };
+      this.aiStock = data.aiStock ? { ...data.aiStock } : rivalStartingStock();
+      this.rivalTickStep = 0;
+      this.aiRaidT = 0;
+      this.popCount = Math.max(0, Math.floor(data.pop?.count ?? 20));
+      this.popProgress = data.pop?.progress ?? 0;
+      this.morale = data.pop?.morale ?? 80;
+      this.foodAcc = 0;
+      this.roads = deserializeRoads(data.roads);
+      for (const k of this.roads) {
+        if (this.buildingTiles.has(k)) {
+          // Camino absorbido por un edificio: fuera de la red.
+          this.roads.delete(k);
+          continue;
+        }
+        const [rx, ry] = k.split(',').map(Number);
+        this.renderRoadTile(rx, ry);
+      }
       this.waveNo = data.waveNo ?? 0;
       this.kills = data.kills ?? 0;
       this.wavesRepelled = data.wavesRepelled ?? 0;
       this.doneObjectives = new Set(data.doneObjectives ?? []);
       this.gameStatus = 'playing';
       for (const p of data.placed) {
-        if (BUILDINGS[p.id]) this.tryPlace(p.id, p.tx, p.ty, true);
+        if (BUILDINGS[p.id]) this.tryPlace(p.id, p.tx, p.ty, true, p.owner ?? 'player');
       }
       this.spawnPopulation();
       this.spawnCritters();
+      // El censo manda: reponer caminantes visibles hasta el nivel guardado.
+      let guard = 0;
+      const settlerCount = () => this.walkers.filter((w) => w.kind === 'settler' && w.faction === 'player').length;
+      while (settlerCount() < Math.min(this.popCount, 40) && guard++ < 30) {
+        this.spawnPerson('settler');
+      }
+      // Cuadrilla rival: reponer si su base sobrevivió al guardado.
+      if (this.rivalAlive()) {
+        const crew: string[] = ['woodcutter', 'carrier', 'settler', 'miner', 'carrier'];
+        let ri = 0;
+        let rguard = 0;
+        while (this.walkers.filter((w) => w.kind === 'settler' && w.faction === 'rival').length < 5 && rguard++ < 8) {
+          this.spawnRivalWorker(crew[ri++ % crew.length]);
+        }
+      }
       for (const p of this.placed) {
         if (p.id === 'puerto') {
           this.spawnShip(p.tx, p.ty);
@@ -1535,6 +1740,10 @@ export class GameScene extends Phaser.Scene {
     const rec = this.buildingHp.get(`${tx},${ty}`);
     rec?.bar.destroy();
     this.buildingHp.delete(`${tx},${ty}`);
+    this.stallMarks.get(`${tx},${ty}`)?.destroy();
+    this.stallMarks.delete(`${tx},${ty}`);
+    this.stallInfo.delete(`${tx},${ty}`);
+    this.jobs = this.jobs.filter((j) => j.key !== `${tx},${ty}`);
     // trigales huérfanos de una granja caída
     if (p.id === 'granja') {
       const { x, y } = this.iso(tx, ty);
@@ -1561,8 +1770,14 @@ export class GameScene extends Phaser.Scene {
     playSfx('error');
     this.time.delayedCall(4000, () => this.hintText.setText(''));
     if (p.id === 'almacen' && this.gameStatus === 'playing') {
-      this.gameStatus = 'defeat';
-      this.hintText?.setText('💀 Sin almacén la colonia cae...').setY(44);
+      if (p.owner === 'rival') {
+        this.gameStatus = 'victory';
+        this.hintText?.setText('🏆 ¡Colonia rival arrasada! Tu asentamiento perdura').setY(44);
+        playSfx('built');
+      } else {
+        this.gameStatus = 'defeat';
+        this.hintText?.setText('💀 Sin almacén la colonia cae...').setY(44);
+      }
     }
     this.updateHud();
   }
@@ -1573,7 +1788,7 @@ export class GameScene extends Phaser.Scene {
       this.hintText?.setText('⛔ Necesitas un cuartel').setY(44);
       return false;
     }
-    const army = this.walkers.filter((w) => w.kind === 'settler' && (w.role === 'soldier' || w.role === 'archer')).length;
+    const army = this.walkers.filter((w) => w.kind === 'settler' && w.faction === 'player' && (w.role === 'soldier' || w.role === 'archer')).length;
     if (army >= 12) {
       this.hintText?.setText('⛔ Ejército al completo (12)').setY(44);
       return false;
@@ -1587,6 +1802,25 @@ export class GameScene extends Phaser.Scene {
     this.stock.espada -= cost.espada;
     this.stock.pan -= cost.pan;
     const role = army % 2 === 0 ? 'soldier' : 'archer';
+    // Reclutar viste a un colono (no aparece de la nada); si no hay
+    // paisanos libres, llega uno nuevo (el censo lo refleja).
+    const volunteer = this.walkers.find((x) => x.kind === 'settler' && x.faction === 'player' && x.role === 'settler' && x.sprite.active);
+    if (volunteer) {
+      volunteer.role = role;
+      volunteer.loaded = false;
+      volunteer.foe = null;
+      this.setGoods(volunteer, null);
+      volunteer.sprite.setScale(wlWorkerScale(WL_WORKERS[role]?.dirs.e?.fh ?? 42));
+      volunteer.sprite.setTexture(`wl-${role}-e`);
+      if (this.anims.exists(`wl-walk-${role}-e`)) volunteer.sprite.play(`wl-walk-${role}-e`);
+      if (!this.sendWalker(volunteer, cuartel.tx, cuartel.ty, () => this.assignJob(volunteer))) {
+        this.assignJob(volunteer);
+      }
+      playSfx('sword');
+      this.updateHud();
+      return true;
+    }
+    this.popCount++;
     const { x, y } = this.iso(cuartel.tx, cuartel.ty);
     const s = this.add.sprite(x + 30, y - 15, `wl-${role}-e`, 0).setDepth(8000);
     s.setScale(wlWorkerScale(WL_WORKERS[role]?.dirs.e?.fh ?? 42));
@@ -1602,6 +1836,10 @@ export class GameScene extends Phaser.Scene {
   /** Cerebro por oficio: encadena ir → trabajar → volver. */
   private assignJob(w: Walker) {
     if (!w.sprite.active || w.state === 'walk' || w.state === 'work') return;
+    if (w.faction === 'rival') {
+      this.rivalStroll(w);
+      return;
+    }
     const role = w.role;
     if (w.kind === 'critter') {
       const cur = this.walkerTile(w);
@@ -1726,7 +1964,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private placeExtraInitial() {
-    this.tryPlace('cantera', this.center.x + 3, this.center.y - 2, true);
+    // (La cantera ya viene en la capa Lógica del mapa: no duplicarla.)
     this.tryPlace('residenciaS', this.center.x - 1, this.center.y + 3, true);
     this.tryPlace('residenciaM', this.center.x + 2, this.center.y + 4, true);
     this.tryPlace('granja', this.center.x + 5, this.center.y + 2, true);
@@ -1734,10 +1972,20 @@ export class GameScene extends Phaser.Scene {
     this.tryPlace('pozo', this.center.x + 1, this.center.y + 1, true);
     this.tryPlace('torre', this.center.x - 5, this.center.y - 4, true);
     this.tryPlace('ornamento', this.center.x + 1, this.center.y - 3, true);
+    // Sendero inicial de ejemplo: del almacén hacia el este (Fase 2).
+    for (let dx = 1; dx <= 3; dx++) this.tryAddRoad(this.center.x + dx, this.center.y);
   }
 
   onTileClicked(tx: number, ty: number) {
+    // worldToTileXY devuelve fracciones: se redondea a la loseta (los errores
+    // de coma flotante tipo 13.9999 y los clics descentrados van a su loseta).
+    tx = Math.round(tx);
+    ty = Math.round(ty);
     const ww = window as unknown as { __inspect?: object | null };
+    if (this.pendingRoad) {
+      this.toggleRoad(tx, ty);
+      return; // la herramienta sigue activa hasta ESC
+    }
     if (!this.pendingBuild) {
       // selección: publica la ficha para el panel React
       const game = (window as unknown as { __game?: { inspect: (x: number, y: number) => object | null } }).__game;
@@ -1762,10 +2010,12 @@ export class GameScene extends Phaser.Scene {
     this.hintText.setText('');
   }
 
-  tryPlace(id: BuildingId, tx: number, ty: number, free: boolean): boolean {
+  tryPlace(id: BuildingId, tx: number, ty: number, free: boolean, owner: Owner = 'player'): boolean {
     const def = BUILDINGS[id];
     const art = WL_BUILDINGS[id];
     if (!art) return false;
+    tx = Math.round(tx);
+    ty = Math.round(ty);
     if (!free) {
       const ok = (Object.entries(def.coste) as [ResourceId, number][]).every(([k, v]) => this.stock[k] >= v);
       if (!ok) {
@@ -1774,19 +2024,39 @@ export class GameScene extends Phaser.Scene {
         this.time.delayedCall(1500, () => this.hintText.setText(''));
         return false;
       }
+      if (this.buildingTiles.has(`${tx},${ty}`)) {
+        this.hintText.setText('⛔ Loseta ocupada por otro edificio').setY(44);
+        playSfx('error');
+        this.time.delayedCall(1500, () => this.hintText.setText(''));
+        return false;
+      }
+      const terr = terrainAt(Math.floor(tx), Math.floor(ty));
+      if (terr === 'water' || terr === 'waterB' || terr === 'waterC' || terr === 'mountain') {
+        this.hintText.setText('⛔ Terreno no válido para construir').setY(44);
+        playSfx('error');
+        this.time.delayedCall(1500, () => this.hintText.setText(''));
+        return false;
+      }
+      if (id === 'puerto' || id === 'pesqueria') {
+        const at = (ax: number, ay: number) => (ax < 0 || ay < 0 || ax >= MAP || ay >= MAP ? null : terrainAt(ax, ay));
+        if (!touchesWater(tx, ty, at)) {
+          this.hintText.setText(`⛔ ${def.nombre} necesita agua adyacente`).setY(44);
+          playSfx('error');
+          this.time.delayedCall(1500, () => this.hintText.setText(''));
+          return false;
+        }
+      }
       for (const [k, v] of Object.entries(def.coste) as [ResourceId, number][]) this.stock[k] -= v;
       playSfx('confirm');
     }
     const scale = wlBuildingScale(art.w, art.h);
     const { x, y } = this.iso(tx, ty);
-    if (id === 'puerto' || id === 'pesqueria') {
-      const at = (ax: number, ay: number) => (ax < 0 || ay < 0 || ax >= MAP || ay >= MAP ? null : terrainAt(ax, ay));
-      if (!touchesWater(tx, ty, at)) {
-        this.hintText.setText(`⛔ ${def.nombre} necesita agua adyacente`).setY(44);
-        playSfx('error');
-        this.time.delayedCall(1500, () => this.hintText.setText(''));
-        return false;
-      }
+    // Un edificio sobre un camino lo absorbe (la red queda limpia).
+    if (hasRoad(this.roads, tx, ty)) {
+      removeRoad(this.roads, tx, ty);
+      this.roadDecals.get(`${tx},${ty}`)?.destroy();
+      this.roadDecals.delete(`${tx},${ty}`);
+      for (const nb of roadNeighbors(this.roads, tx, ty)) this.renderRoadTile(nb.x, nb.y);
     }
     const depth = 6000 + ty * 4;
     const parts: Phaser.GameObjects.GameObject[] = [];
@@ -1804,8 +2074,18 @@ export class GameScene extends Phaser.Scene {
       img = this.add.image(0, 0, WL_TEX[id]).setOrigin(ox, oy).setScale(scale);
     }
     parts.push(img);
-    const name = this.add.text(0, 10, def.nombre, { fontSize: '9px', color: '#fff', backgroundColor: '#00000077', padding: { x: 4, y: 2 } }).setOrigin(0.5);
+    const name = this.add.text(0, 10, owner === 'rival' ? `⚔ ${def.nombre}` : def.nombre, { fontSize: '9px', color: '#fff', backgroundColor: '#00000077', padding: { x: 4, y: 2 } }).setOrigin(0.5);
     parts.push(name);
+    if (owner === 'rival') {
+      // Banderín rojo: identidad del rival legible en el mundo.
+      const g = this.add.graphics();
+      const topY = -art.h * scale - 4;
+      g.lineStyle(2, 0x3a2415, 1);
+      g.lineBetween(-2, topY, -2, topY - 16);
+      g.fillStyle(0xb3402e, 1);
+      g.fillTriangle(-2, topY - 16, -2, topY - 4, 13, topY - 10);
+      parts.push(g);
+    }
     const c = this.add.container(x, y, parts).setDepth(depth);
     img.setAlpha(0); // se revela al terminar la obra
     // Etapa de obra: si hay sheet de construcción oficial se muestra creciendo;
@@ -1827,7 +2107,7 @@ export class GameScene extends Phaser.Scene {
     const worker = this.add.image(30, -12, 'wl-carrier-e', 4).setScale(wlWorkerScale(42));
     c.add(worker);
     this.tweens.add({ targets: worker, y: -16, duration: 380, yoyo: true, repeat: 8 });
-    this.drawPath(x, y, depth - 1);
+    if (owner === 'player') this.drawPath(x, y, depth - 1);
     this.tweens.add({
       targets: buildFx ? [buildFx] : [], alpha: 0, duration: Math.min(def.tiempoConstruccionMs, 4000),
       onComplete: () => {
@@ -1836,16 +2116,16 @@ export class GameScene extends Phaser.Scene {
         if (id === 'puerto') this.spawnShip(tx, ty);
       },
     });
-    this.placed.push({ id, tx, ty, sprite: c, done: 0, total: def.tiempoConstruccionMs });
+    this.placed.push({ id, tx, ty, sprite: c, done: 0, total: def.tiempoConstruccionMs, owner });
     this.buildingTiles.add(`${tx},${ty}`);
     if (WL_SMOKE.has(id)) this.addSmoke(x, y - art.h * scale * 0.85, depth + 1);
-    if (id === 'granja') this.plantWheat(x, y, depth);
+    if (id === 'granja' && owner === 'player') this.plantWheat(x, y, depth);
     // farol nocturno sobre la puerta
     const lamp = this.add.image(x, y - art.h * scale * 0.55, 'glow')
       .setDepth(depth + 2).setScale(0.9).setAlpha(0).setBlendMode(Phaser.BlendModes.ADD);
     this.lanterns.push(lamp);
-    if (id === 'torre') this.territoryRadius += 1.5;
-    if (id === 'cuartel') {
+    if (id === 'torre' && owner === 'player') this.territoryRadius += 1.5;
+    if (id === 'cuartel' && owner === 'player') {
       if (!free) playSfx('sword');
       for (const t of ['soldier', 'archer']) {
         const s = this.add.sprite(x + 30, y - 15, `wl-${t}-e`, 0).setDepth(8000);
@@ -1952,43 +2232,313 @@ export class GameScene extends Phaser.Scene {
   }
 
   private tickEconomy() {
-    const auto: Partial<Record<BuildingId, { in: Partial<Record<ResourceId, number>>; out: Partial<Record<ResourceId, number>> }>> = {
-      cabanaLenador: { in: {}, out: { madera: 2 } },
-      cantera: { in: {}, out: { piedra: 2 } },
-      granja: { in: {}, out: { grano: 2 } },
-      pozo: { in: {}, out: { agua: 2 } },
-      pesqueria: { in: {}, out: { pez: 2 } },
-      minaCarbon: { in: { pan: 1 }, out: { carbon: 2 } },
-      minaHierro: { in: { pan: 1 }, out: { hierro: 2 } },
-      minaOro: { in: { pan: 1 }, out: { oro: 1 } },
-    };
-    for (const p of this.placed) {
-      const rule = auto[p.id];
-      if (rule) {
-        const can = Object.entries(rule.in).every(([k, v]) => this.stock[k as ResourceId] >= (v ?? 0));
-        if (can) {
-          for (const [k, v] of Object.entries(rule.in)) this.stock[k as ResourceId] -= v ?? 0;
-          for (const [k, v] of Object.entries(rule.out)) this.stock[k as ResourceId] += v ?? 0;
-        }
-      }
-    }
+    this.econTickNo++;
+    this.stock = tickAutoProducers(this.stock, this.placed.filter((p) => p.owner !== 'rival').map((p) => p.id), this.econTickNo);
+    this.aiStock = tickAutoProducers(this.aiStock, this.placed.filter((p) => p.owner === 'rival').map((p) => p.id), this.econTickNo);
     const recipeByBuilding: Partial<Record<BuildingId, string>> = RECIPE_BY_BUILDING;
     for (const p of this.placed) {
       const rid = recipeByBuilding[p.id];
       if (!rid) continue;
-      let job = this.jobs.find((j) => j.edificio === p.id);
-      if (!job) { job = { recipeId: rid, edificio: p.id, progresoMs: 0, duracionMs: 8000 }; this.jobs.push(job); }
+      const jkey = `${p.tx},${p.ty}`;
+      let job = this.jobs.find((j) => j.key === jkey);
+      if (!job) { job = { recipeId: rid, edificio: p.id, progresoMs: 0, duracionMs: 8000, key: jkey }; this.jobs.push(job); }
+      if (p.owner === 'rival') {
+        const r = tickJob(this.aiStock, job, 1000);
+        this.aiStock = r.stock;
+        Object.assign(job, r.job);
+        continue;
+      }
       const r = tickJob(this.stock, job, 1000);
       this.stock = r.stock;
       Object.assign(job, r.job);
+      this.refreshStall(p, rid, !r.terminado && r.job.progresoMs >= r.job.duracionMs);
     }
+    this.tickPopulation();
+    this.rivalTick();
     this.checkObjectives();
     this.updateHud();
   }
 
+  /** Come (pan y luego pescado), calcula moral y mueve el censo. */
+  private tickPopulation() {
+    const cap = housingFor(this.placed.filter((p) => p.owner === 'player').map((p) => p.id));
+    // Comer: pan primero, pescado después (con arrastre fraccional).
+    let need = foodPerTick(this.popCount) + this.foodAcc;
+    this.foodAcc = 0;
+    for (const k of ['pan', 'pez'] as ResourceId[]) {
+      const got = Math.min(this.stock[k], Math.floor(need));
+      this.stock[k] -= got;
+      need -= got;
+    }
+    this.foodAcc = Math.min(need, 2); // fracción pendiente (deuda topada)
+    this.morale = moraleOf({
+      population: this.popCount,
+      housing: cap,
+      food: this.stock.pan + this.stock.pez,
+    });
+    const g = growthPerTick({
+      population: this.popCount,
+      housing: cap,
+      food: this.stock.pan + this.stock.pez,
+      morale: this.morale,
+    });
+    this.popProgress += g;
+    if (this.popProgress >= 1) {
+      this.popProgress = 0;
+      this.immigrateOne(cap);
+    } else if (this.popProgress <= -1) {
+      this.popProgress = 0;
+      this.emigrateOne();
+    }
+  }
+
+  /** Marca ⚠ sobre el edificio parado por falta de insumos (Fase 2). */
+  private refreshStall(p: { id: BuildingId; tx: number; ty: number }, recipeId: string, stalled: boolean) {
+    const k = `${p.tx},${p.ty}`;
+    if (!stalled) {
+      if (this.stallMarks.has(k)) {
+        this.stallMarks.get(k)?.destroy();
+        this.stallMarks.delete(k);
+        this.stallInfo.delete(k);
+      }
+      return;
+    }
+    const recipe = RECIPES.find((r) => r.id === recipeId);
+    const faltan = recipe ? missingInputs(this.stock, recipe.entradas) : [];
+    this.stallInfo.set(k, faltan);
+    if (this.stallMarks.has(k)) return;
+    const { x, y } = this.iso(p.tx, p.ty);
+    const mark = this.add.text(x + 34, y - 92, '⚠', { fontSize: '22px' })
+      .setOrigin(0.5).setDepth(9600);
+    this.tweens.add({ targets: mark, y: y - 100, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    this.stallMarks.set(k, mark);
+  }
+
+  /** Loseta de tierra en el borde para entrar/salir del mapa. */
+  private edgeLandTile(): GridPos | null {
+    const edge: GridPos[] = [];
+    for (let i = 2; i < MAP - 2; i++) {
+      edge.push({ x: i, y: 2 }, { x: i, y: MAP - 3 }, { x: 2, y: i }, { x: MAP - 3, y: i });
+    }
+    const land = edge.filter((p) => {
+      const t = terrainAt(p.x, p.y);
+      return t !== 'water' && t !== 'waterB' && t !== 'waterC' && t !== 'mountain';
+    });
+    if (!land.length) return null;
+    return land[Phaser.Math.Between(0, land.length - 1)];
+  }
+
+  /** Un colono nuevo llega andando desde el borde hasta el almacén. */
+  private immigrateOne(cap: number) {
+    const settlers = this.walkers.filter((w) => w.kind === 'settler' && w.faction === 'player');
+    if (this.popCount >= cap || settlers.length >= 44) return;
+    const at = this.edgeLandTile();
+    const home = this.placed[0];
+    if (!at || !home) return;
+    const { x, y } = this.iso(at.x, at.y);
+    const s = this.add.sprite(x, y - 15, 'wl-settler-e', 0).setDepth(8000);
+    s.setScale(wlWorkerScale(WL_WORKERS.settler?.dirs.e?.fh ?? 42));
+    const shadow = this.add.image(x, y - 1, 'shadow').setDepth(7999).setAlpha(0.6).setScale(1.2);
+    const w = this.makeWalker(s, shadow, 'settler', 'settler');
+    this.popCount++;
+    playSfx('confirm');
+    const gx = Phaser.Math.Clamp(home.tx + Phaser.Math.Between(-2, 2), 2, MAP - 3);
+    const gy = Phaser.Math.Clamp(home.ty + Phaser.Math.Between(-2, 2), 2, MAP - 3);
+    if (!this.sendWalker(w, gx, gy, () => this.assignJob(w))) this.assignJob(w);
+    this.hintText?.setText('🚶 ¡Un colono se une a tu colonia!').setY(44);
+    this.time.delayedCall(2500, () => this.hintText.setText(''));
+  }
+
+  /** Un colono hace las maletas y abandona la colonia por el borde. */
+  private emigrateOne() {
+    const leaver = this.walkers.find((w) =>
+      w.kind === 'settler' && w.faction === 'player' && w.sprite.active && w.role !== 'soldier' && w.role !== 'archer');
+    this.popCount = Math.max(0, this.popCount - 1);
+    if (!leaver) return;
+    // Deja lo que lleve y se va (al llegar se disuelve sin recontar).
+    leaver.loaded = false;
+    this.setGoods(leaver, null);
+    const at = this.edgeLandTile();
+    if (!at) {
+      this.killWalkerSilent(leaver);
+      return;
+    }
+    if (!this.sendWalker(leaver, at.x, at.y, () => this.killWalkerSilent(leaver))) {
+      this.killWalkerSilent(leaver);
+    }
+    this.hintText?.setText('🚶 Un colono abandona la colonia...').setY(44);
+    this.time.delayedCall(2500, () => this.hintText.setText(''));
+  }
+
+  /** Elimina un caminante sin tocar el censo (ya descontado). */
+  private killWalkerSilent(w: Walker) {
+    w.sprite.destroy();
+    w.shadow.destroy();
+    w.goodsIcon?.destroy();
+    this.walkers = this.walkers.filter((x) => x !== w);
+  }
+
+  // ============ Rival (Fase 4): director con las mismas reglas ============
+  private rivalAlive(): boolean {
+    return this.placed.some((p) => p.owner === 'rival' && p.id === 'almacen');
+  }
+
+  private rivalBuildings(): BuildingId[] {
+    return this.placed.filter((p) => p.owner === 'rival').map((p) => p.id);
+  }
+
+  private rivalGarrison(): Enemy[] {
+    return this.enemies.filter((e) => e.side === 'rival' && e.mode === 'garrison' && e.sprite.active);
+  }
+
+  private setupRival() {
+    const at = (x: number, y: number) => terrainAt(x, y);
+    this.aiCenter = findRivalBase(at, MAP, this.center.x, this.center.y);
+    if (!this.aiCenter) return; // isla sin sitio: sin rival
+    const c = this.aiCenter;
+    this.tryPlace('almacen', c.x, c.y, true, 'rival');
+    const hut = this.rivalSpot();
+    if (hut) this.tryPlace('cabanaLenador', hut.x, hut.y, true, 'rival');
+    const crew: string[] = ['woodcutter', 'carrier', 'settler', 'miner', 'carrier'];
+    for (const role of crew) this.spawnRivalWorker(role);
+    this.time.delayedCall(25000, () => {
+      if (this.gameStatus !== 'playing' || !this.rivalAlive()) return;
+      this.hintText?.setText('⚔ Exploradores avistan otra colonia al otro lado...').setY(44);
+      this.time.delayedCall(5000, () => this.hintText.setText(''));
+    });
+  }
+
+  /** Primera loseta libre en espiral alrededor de la base rival.
+   *  Con un anillo de separación para que el pueblo respire (sin solapes). */
+  private rivalSpot(): GridPos | null {
+    if (!this.aiCenter) return null;
+    const nearBuilding = (tx: number, ty: number): boolean => {
+      for (let oy = -1; oy <= 1; oy++) {
+        for (let ox = -1; ox <= 1; ox++) {
+          if (this.buildingTiles.has(`${tx + ox},${ty + oy}`)) return true;
+        }
+      }
+      return false;
+    };
+    for (let r = 1; r <= 7; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const tx = Math.round(this.aiCenter.x + dx);
+          const ty = Math.round(this.aiCenter.y + dy);
+          if (tx < 1 || ty < 1 || tx >= MAP - 1 || ty >= MAP - 1) continue;
+          if (this.buildingTiles.has(`${tx},${ty}`)) continue;
+          if (nearBuilding(tx, ty)) continue;
+          const t = terrainAt(tx, ty);
+          if (t === 'water' || t === 'waterB' || t === 'waterC' || t === 'mountain') continue;
+          return { x: tx, y: ty };
+        }
+      }
+    }
+    return null;
+  }
+
+  private spawnRivalWorker(role: string) {
+    if (!this.aiCenter) return;
+    const tx = Phaser.Math.Clamp(Math.round(this.aiCenter.x + Phaser.Math.Between(-3, 3)), 2, MAP - 3);
+    const ty = Phaser.Math.Clamp(Math.round(this.aiCenter.y + Phaser.Math.Between(-3, 3)), 2, MAP - 3);
+    const { x, y } = this.iso(tx, ty);
+    const s = this.add.sprite(x, y - 15, `wl-${role}-e`, 0).setDepth(8000);
+    s.setScale(wlWorkerScale(WL_WORKERS[role]?.dirs.e?.fh ?? 42));
+    s.setTint(0xffb3b3); // tez rival: mismo colono, otro bando
+    if (this.anims.exists(`wl-walk-${role}-e`)) s.play(`wl-walk-${role}-e`);
+    const shadow = this.add.image(x, y - 1, 'shadow').setDepth(7999).setAlpha(0.6).setScale(1.2);
+    const w = this.makeWalker(s, shadow, role, 'settler', 'rival');
+    this.rivalStroll(w);
+  }
+
+  private rivalStroll(w: Walker) {
+    if (!this.aiCenter) {
+      this.rest(w, 1 + Math.random() * 2);
+      return;
+    }
+    const nx = Phaser.Math.Clamp(Math.round(this.aiCenter.x + Phaser.Math.Between(-5, 5)), 2, MAP - 3);
+    const ny = Phaser.Math.Clamp(Math.round(this.aiCenter.y + Phaser.Math.Between(-5, 5)), 2, MAP - 3);
+    if (!this.sendWalker(w, nx, ny)) this.rest(w, 1 + Math.random() * 2);
+  }
+
+  private spawnRivalTroop() {
+    const base = this.placed.find((p) => p.owner === 'rival' && p.id === 'cuartel')
+      ?? this.placed.find((p) => p.owner === 'rival' && p.id === 'almacen');
+    if (!base) return;
+    const n = this.rivalGarrison().length + this.enemies.filter((e) => e.side === 'rival' && e.sprite.active).length;
+    const ranged = n % 3 === 2;
+    const { x, y } = this.iso(base.tx, base.ty);
+    const sprite = this.add.sprite(x + 24, y - 15, ranged ? 'wl-archer-e' : 'wl-soldier-e', 0).setDepth(8000);
+    sprite.setTint(0x3b6ea5); // acero rival
+    sprite.setScale(wlWorkerScale(WL_WORKERS.soldier?.dirs.e?.fh ?? 42));
+    sprite.play(ranged ? 'wl-walk-archer-e' : 'wl-walk-soldier-e');
+    const shadow = this.add.image(x + 24, y - 1, 'shadow').setDepth(7999).setAlpha(0.6).setScale(1.2);
+    const bar = this.add.graphics().setDepth(8200);
+    this.enemies.push({
+      sprite, shadow, hp: 45, maxHp: 45, dmg: 3.5,
+      ranged, base: ranged ? 'archer' : 'soldier', side: 'rival', mode: 'garrison',
+      path: [], targetPx: null, speed: 60, target: null, attackT: 0, bar,
+    });
+  }
+
+  /** Director rival: un paso cada ~12s de pared (lo llama tickEconomy). */
+  private rivalTickStep = 0;
+
+  private rivalTick() {
+    if (!this.aiCenter || this.gameStatus !== 'playing' || !this.rivalAlive()) return;
+    this.rivalTickStep++;
+    const built = this.rivalBuildings();
+    // Construir según el orden (o tardío por rotación).
+    if (this.rivalTickStep % 12 === 0) {
+      const next = nextRivalBuild(RIVAL_ORDER, built, this.aiStock)
+        ?? lateRivalBuild(built.length, this.aiStock);
+      if (next) {
+        const spot = this.rivalSpot();
+        if (spot) {
+          this.aiStock = payCost(this.aiStock, BUILDINGS[next].coste);
+          if (this.tryPlace(next, spot.x, spot.y, true, 'rival') && (next === 'cuartel' || next === 'torre')) {
+            this.hintText?.setText(`⚔ El rival levanta ${BUILDINGS[next].nombre}`).setY(44);
+            this.time.delayedCall(4000, () => this.hintText.setText(''));
+          }
+        }
+      }
+      // Mano de obra rival visible (tope 6).
+      const crew = this.walkers.filter((w) => w.kind === 'settler' && w.faction === 'rival').length;
+      if (crew < 6) {
+        this.spawnRivalWorker(['carrier', 'woodcutter', 'settler', 'miner'][crew % 4]);
+      }
+    }
+    // Reclutar guarnición con los mismos costes que el jugador.
+    const garrison = this.rivalGarrison();
+    if (built.includes('cuartel') && garrison.length < 5 && this.rivalTickStep % 6 === 0) {
+      const cost = recruitCost(garrison.length);
+      if ((this.aiStock.espada ?? 0) >= cost.espada && (this.aiStock.pan ?? 0) >= cost.pan) {
+        this.aiStock.espada -= cost.espada;
+        this.aiStock.pan -= cost.pan;
+        this.spawnRivalTroop();
+      }
+    }
+    // Incursión cada ~75s si hay guarnición.
+    this.aiRaidT++;
+    if (this.aiRaidT >= 75) {
+      this.aiRaidT = 0;
+      const raiders = this.rivalGarrison().slice(0, 3);
+      if (raiders.length >= 2) {
+        for (const e of raiders) {
+          e.mode = 'raid';
+          this.sendEnemy(e);
+        }
+        this.aiRaids++;
+        this.hintText?.setText(`⚔ ¡Incursión rival! ${raiders.length} soldados se acercan`).setY(44);
+        playSfx('sword');
+        this.time.delayedCall(4000, () => this.hintText.setText(''));
+      }
+    }
+  }
+
   private updateHud() {
-    const s = this.stock;
-    this.hudText?.setText(`🪵${s.madera}  🧱${s.tablon}/${s.piedra}  🌾${s.grano} 🍞${s.pan} 💧${s.agua} 🐟${s.pez}  ⛏${s.carbon}/${s.hierro}/${s.oro} 👑${s.lingoteOro}  🛠${s.herramienta} ⚔${s.espada} 🏹${s.arco}  🏠${this.placed.length}`);
+    // El HUD visible vive en React (/play lee window.__stock cada segundo).
     (window as unknown as { __stock?: Stock }).__stock = { ...this.stock };
   }
 
@@ -1996,26 +2546,60 @@ export class GameScene extends Phaser.Scene {
     const w = window as unknown as {
       __game?: {
         place: (id: BuildingId) => void;
+        road: () => void;
+        debugClick: (sx: number, sy: number) => { x: number; y: number } | null;
+        focus: (tx: number, ty: number) => void;
+        pop: () => { pop: number; cap: number; morale: number; eating: number };
+        stalls: () => { id: BuildingId; nombre: string; tx: number; ty: number; faltan: string[] }[];
         stock: () => Stock;
         counts: () => number;
         recruit: () => boolean;
         save: () => string | null;
         load: () => boolean;
         hasSave: () => string | null;
-        status: () => { status: string; wave: number; kills: number; buildings: number; timeSec: number };
+        status: () => { status: string; wave: number; kills: number; buildings: number; timeSec: number; rival: number; aiBase: { x: number; y: number } | null; ai: { espada: number; pan: number; hierro: number; carbon: number; lingote: number; troops: number; raids: number } };
         objectives: () => { id: string; text: string; done: boolean }[];
         inspect: (tx: number, ty: number) => {
           id: BuildingId; nombre: string; descripcion: string; categoria: string;
           receta?: { in: [string, number][]; out: [string, number][] };
           produciendo: boolean;
+          faltan?: string[];
+          bando: 'tuya' | 'rival';
         } | null;
       };
     };
     w.__game = {
       place: (id: BuildingId) => {
         this.pendingBuild = id;
+        this.pendingRoad = false;
         this.hideSelectRing();
         this.hintText?.setText(`🏗 ${BUILDINGS[id].nombre}: clic en una loseta (ESC cancela)`).setY(44);
+      },
+      road: () => {
+        this.pendingRoad = true;
+        this.pendingBuild = null;
+        this.hideSelectRing();
+        this.clearGhost();
+        this.hintText?.setText('🛤 Camino: clic o arrastra para trazar (clic en camino = quitar, ESC termina)').setY(44);
+      },
+      debugClick: (lx: number, ly: number) => {
+        const wp = this.cameras.main.getWorldPoint(lx, ly);
+        const t = this.groundLayer.worldToTileXY(wp.x, wp.y);
+        return t ? { x: t.x, y: t.y } : null;
+      },
+      pop: () => ({
+        pop: this.popCount,
+        cap: housingFor(this.placed.filter((p) => p.owner === 'player').map((p) => p.id)),
+        morale: this.morale,
+        eating: foodPerTick(this.popCount),
+      }),
+      stalls: () => {
+        const out: { id: BuildingId; nombre: string; tx: number; ty: number; faltan: string[] }[] = [];
+        for (const p of this.placed) {
+          const faltan = this.stallInfo.get(`${p.tx},${p.ty}`);
+          if (faltan) out.push({ id: p.id, nombre: BUILDINGS[p.id].nombre, tx: p.tx, ty: p.ty, faltan: [...faltan] });
+        }
+        return out;
       },
       stock: () => ({ ...this.stock }),
       counts: () => this.placed.length,
@@ -2028,11 +2612,25 @@ export class GameScene extends Phaser.Scene {
         kills: this.kills,
         buildings: this.placed.length,
         timeSec: Math.floor((this.time.now - this.startTime) / 1000),
+        rival: this.rivalBuildings().length,
+        aiBase: this.aiCenter ? { ...this.aiCenter } : null,
+        ai: {
+          espada: this.aiStock.espada, pan: this.aiStock.pan,
+          hierro: this.aiStock.hierro, carbon: this.aiStock.carbon,
+          lingote: this.aiStock.lingoteHierro,
+          troops: this.enemies.filter((e) => e.side === 'rival' && e.sprite.active).length,
+          raids: this.aiRaids,
+        },
       }),
+      // Hook QA: centra la cámara en una loseta (sondas, no UI).
+      focus: (tx: number, ty: number) => {
+        const p = this.iso(Math.round(tx), Math.round(ty));
+        this.panTarget = { x: p.x, y: p.y };
+      },
       objectives: () => {
-        const army = this.walkers.filter((x) => x.kind === 'settler' && (x.role === 'soldier' || x.role === 'archer')).length;
+        const army = this.walkers.filter((x) => x.kind === 'settler' && x.faction === 'player' && (x.role === 'soldier' || x.role === 'archer')).length;
         const state = {
-          buildings: this.placed.map((p) => p.id),
+          buildings: this.placed.filter((p) => p.owner === 'player').map((p) => p.id),
           army,
           wavesRepelled: this.wavesRepelled,
         };
@@ -2067,7 +2665,9 @@ export class GameScene extends Phaser.Scene {
             in: Object.entries(recipe.entradas) as [string, number][],
             out: Object.entries(recipe.salidas) as [string, number][],
           } : undefined,
-          produciendo: !!recipe,
+          produciendo: !!recipe && !this.stallInfo.has(`${tx},${ty}`),
+          faltan: this.stallInfo.get(`${tx},${ty}`),
+          bando: p.owner === 'rival' ? 'rival' : 'tuya',
         };
       },
     };
@@ -2075,13 +2675,75 @@ export class GameScene extends Phaser.Scene {
 
   override update(_time: number, delta: number) {
     const cam = this.cameras.main;
-    const speed = 22 / cam.zoom;
-    const keys = this.input.keyboard?.createCursorKeys();
-    if (keys?.left.isDown || this.wasd?.A.isDown) cam.scrollX -= speed;
-    if (keys?.right.isDown || this.wasd?.D.isDown) cam.scrollX += speed;
-    if (keys?.up.isDown || this.wasd?.W.isDown) cam.scrollY -= speed;
-    if (keys?.down.isDown || this.wasd?.S.isDown) cam.scrollY += speed;
     const dt = Math.min(delta, 100) / 1000;
+    // --- Economía a 1 tick/s de pared, independiente de los FPS.
+    const wallNow = performance.now();
+    if (this.econLast > 0) {
+      this.econAcc += Math.min(wallNow - this.econLast, 250);
+      let n = 0;
+      while (this.econAcc >= 1000 && n < 3) {
+        this.tickEconomy();
+        this.econAcc -= 1000;
+        n++;
+      }
+      if (n === 3) this.econAcc = 0;
+    }
+    this.econLast = wallNow;
+    // --- Cámara suave: velocidad con inercia + edge scrolling + zoom interpolado.
+    const accel = 2600 / cam.zoom;
+    let ix = 0;
+    let iy = 0;
+    if (this.cursors?.left.isDown || this.wasd?.A.isDown) ix -= 1;
+    if (this.cursors?.right.isDown || this.wasd?.D.isDown) ix += 1;
+    if (this.cursors?.up.isDown || this.wasd?.W.isDown) iy -= 1;
+    if (this.cursors?.down.isDown || this.wasd?.S.isDown) iy += 1;
+    // Edge scrolling (márgenes de 14px, solo si el puntero está dentro del canvas
+    // y ya se ha movido alguna vez: evita que el puntero sintético (0,0)
+    // arrastre la cámara a una esquina al cargar la partida).
+    const p = this.input.activePointer;
+    const w = this.scale.width;
+    const h = this.scale.height;
+    if (this.edgeArmed && p && !p.isDown && p.x >= 0 && p.y >= 0 && p.x <= w && p.y <= h && !this.inMinimap(p.x, p.y)) {
+      const m = 14;
+      if (p.x < m) ix -= 1;
+      else if (p.x > w - m) ix += 1;
+      if (p.y < m) iy -= 1;
+      else if (p.y > h - m) iy += 1;
+    }
+    if (this.wasd?.Q.isDown) this.zoomTarget = Phaser.Math.Clamp(this.zoomTarget * (1 - dt * 1.2), 0.35, 2);
+    if (this.wasd?.E.isDown) this.zoomTarget = Phaser.Math.Clamp(this.zoomTarget * (1 + dt * 1.2), 0.35, 2);
+    const n = Math.hypot(ix, iy) || 1;
+    this.camVel.x = Phaser.Math.Linear(this.camVel.x, (ix / n) * accel * dt * 18, 1 - Math.exp(-dt * 8));
+    this.camVel.y = Phaser.Math.Linear(this.camVel.y, (iy / n) * accel * dt * 18, 1 - Math.exp(-dt * 8));
+    // Cualquier entrada manual cancela el paneado programado.
+    if (ix !== 0 || iy !== 0 || (p && p.isDown)) this.panTarget = null;
+    if (this.panTarget) {
+      // Paneado suave hacia el objetivo (centra la vista en él).
+      const wantX = this.panTarget.x - cam.width / (2 * cam.zoom);
+      const wantY = this.panTarget.y - cam.height / (2 * cam.zoom);
+      const k = 1 - Math.exp(-dt * 5);
+      cam.scrollX = Phaser.Math.Linear(cam.scrollX, wantX, k);
+      cam.scrollY = Phaser.Math.Linear(cam.scrollY, wantY, k);
+      this.camVel.x = 0;
+      this.camVel.y = 0;
+      if (Math.hypot(wantX - cam.scrollX, wantY - cam.scrollY) < 3) this.panTarget = null;
+    } else {
+      cam.scrollX += this.camVel.x * dt;
+      cam.scrollY += this.camVel.y * dt;
+    }
+    if (Math.abs(cam.zoom - this.zoomTarget) > 0.001) {
+      const nz = Phaser.Math.Linear(cam.zoom, this.zoomTarget, 1 - Math.exp(-dt * 8));
+      cam.setZoom(nz);
+      if (this.zoomAnchor) {
+        try {
+          const after = cam.getWorldPoint(this.zoomAnchor.sx, this.zoomAnchor.sy);
+          cam.scrollX += this.zoomAnchor.wx - after.x;
+          cam.scrollY += this.zoomAnchor.wy - after.y;
+        } catch { /* noop */ }
+      }
+    } else {
+      this.zoomAnchor = null;
+    }
     this.updateWalkers(dt * 1000);
     this.updateShips(dt);
     this.updateEnemies(dt);

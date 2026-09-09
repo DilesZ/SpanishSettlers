@@ -41,11 +41,11 @@ export default function Home() {
             <figcaption className="bg-black/40 px-3 py-1 text-left text-xs text-white/60">De noche: faroles y estrellas</figcaption>
           </figure>
         </div>
-        <div className="mt-6 grid grid-cols-1 gap-2 text-left text-xs text-white/60 sm:grid-cols-3">
-          <div className="rounded-lg bg-black/30 p-3">🌾 <b>Economía viva:</b> 16 recursos, recetas, puerto y cosechas.</div>
-          <div className="rounded-lg bg-black/30 p-3">⚔️ <b>Defensa:</b> torres, reclutas y 10 oleadas hasta la victoria.</div>
-          <div className="rounded-lg bg-black/30 p-3">💾 <b>Tu ritmo:</b> guardado automático, objetivos y minimapa.</div>
-        </div>
+          <div className="mt-6 grid grid-cols-1 gap-2 text-left text-xs text-white/60 sm:grid-cols-3">
+            <div className="rounded-lg bg-black/30 p-3">🌾 <b>Economía viva:</b> 16 recursos, recetas, caminos, puerto y cosechas.</div>
+            <div className="rounded-lg bg-black/30 p-3">⚔️ <b>Rival y defensa:</b> una colonia IA que crece, comercia y ataca; torres y 10 oleadas hasta la victoria.</div>
+            <div className="rounded-lg bg-black/30 p-3">💾 <b>Tu ritmo:</b> guardado automático, objetivos y minimapa.</div>
+          </div>
         <p className="mt-6 text-[11px] text-white/40">
           Arte de edificios, colonos y fauna © Widelands Development Team (GPL-2.0+).
           Código y resto de assets propios. Proyecto sin afiliación con Ubisoft/Blue Byte.

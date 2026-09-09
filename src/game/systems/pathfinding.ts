@@ -14,7 +14,9 @@ function heuristic(a: GridPos, b: GridPos): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
-/** Camino de start a goal (ambos incluidos) o null si no hay ruta. */
+/** Camino de start a goal (ambos incluidos) o null si no hay ruta.
+ *  costFn pondera entrar en cada loseta (por defecto 1: coste uniforme).
+ *  Úsalo con tileCost() de roads.ts para que los colonos prefieran caminos. */
 export function findPath(
   start: GridPos,
   goal: GridPos,
@@ -22,6 +24,7 @@ export function findPath(
   height: number,
   blocked: BlockedFn,
   maxIter = 4000,
+  costFn: (x: number, y: number) => number = () => 1,
 ): GridPos[] | null {
   if (start.x === goal.x && start.y === goal.y) return [{ ...start }];
   // el destino siempre es transitable (edificio/mina/árbol al que se va)
@@ -61,7 +64,7 @@ export function findPath(
       const ny = current.y + dy;
       if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
       if (isBlocked(nx, ny)) continue;
-      const tentative = (gScore.get(key(current.x, current.y)) ?? Infinity) + 1;
+      const tentative = (gScore.get(key(current.x, current.y)) ?? Infinity) + Math.max(0.1, costFn(nx, ny));
       if (tentative < (gScore.get(key(nx, ny)) ?? Infinity)) {
         cameFrom.set(key(nx, ny), key(current.x, current.y));
         gScore.set(key(nx, ny), tentative);

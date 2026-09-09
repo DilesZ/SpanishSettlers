@@ -13,6 +13,48 @@ export function canAfford(stock: Stock, cost: Partial<Record<ResourceId, number>
   return Object.entries(cost).every(([k, v]) => (stock[k as ResourceId] ?? 0) >= (v ?? 0));
 }
 
+/** Qué recursos faltan para pagar un coste (vacío = se puede pagar).
+ *  Para el aviso "producción bloqueada" de la Fase 2 (caminos/logística). */
+export function missingInputs(
+  stock: Stock,
+  cost: Partial<Record<ResourceId, number>>,
+): ResourceId[] {
+  const out: ResourceId[] = [];
+  for (const [k, v] of Object.entries(cost)) {
+    if ((stock[k as ResourceId] ?? 0) < (v ?? 0)) out.push(k as ResourceId);
+  }
+  return out;
+}
+
+/** Productores automáticos (sin receta): cabaña, cantera, granja, pozo,
+ *  pesquería y minas (comen pan). Puro: devuelve el stock resultante.
+ *  Lo usan el jugador y la IA rival con sus propios stocks (Fase 4). */
+const AUTO_RULES: Partial<Record<BuildingId, { in: Partial<Record<ResourceId, number>>; out: Partial<Record<ResourceId, number>> }>> = {
+  cabanaLenador: { in: {}, out: { madera: 2 } },
+  cantera: { in: {}, out: { piedra: 2 } },
+  granja: { in: {}, out: { grano: 2 } },
+  pozo: { in: {}, out: { agua: 2 } },
+  pesqueria: { in: {}, out: { pez: 2 } },
+  minaCarbon: { in: { pan: 1 }, out: { carbon: 2 } },
+  minaHierro: { in: { pan: 1 }, out: { hierro: 2 } },
+  minaOro: { in: { pan: 1 }, out: { oro: 1 } },
+};
+
+export function tickAutoProducers(stock: Stock, buildingIds: BuildingId[], tickNo = 0): Stock {
+  const next = { ...stock };
+  for (const id of buildingIds) {
+    const rule = AUTO_RULES[id];
+    if (!rule) continue;
+    // Las minas comen un pan cada 4 ticks (si no, ni jugador ni IA podrían
+    // sostenerlas con la producción de una panadería: 1 pan/s es impagable).
+    if ((id === 'minaCarbon' || id === 'minaHierro' || id === 'minaOro') && tickNo % 4 !== 0) continue;
+    if (!canAfford(next, rule.in)) continue;
+    for (const [k, v] of Object.entries(rule.in)) next[k as ResourceId] -= v ?? 0;
+    for (const [k, v] of Object.entries(rule.out)) next[k as ResourceId] += v ?? 0;
+  }
+  return next;
+}
+
 export function payCost(stock: Stock, cost: Partial<Record<ResourceId, number>>): Stock {
   if (!canAfford(stock, cost)) throw new Error('Recursos insuficientes');
   const next = { ...stock };
@@ -27,6 +69,8 @@ export interface ProductionJob {
   edificio: BuildingId;
   progresoMs: number;
   duracionMs: number;
+  /** Clave de instancia ("tx,ty"): cada edificio produce por separado. */
+  key?: string;
 }
 
 export function createJob(edificio: BuildingId, recipeId: string, duracionMs: number): ProductionJob {

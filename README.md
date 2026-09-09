@@ -1,7 +1,7 @@
-# SpanishSettlers — clon web original inspirado en RTS de colonos
+# SpanishSettlers — RTS de colonos original para la web
 
-Juego web de estrategia con economía viva, territorio y combate básico.
-**Proyecto 100% original**: código, arte procedural y textos propios.
+Juego web de estrategia con economía viva, territorio, población y colonia
+rival. **Proyecto 100% original**: código, arte procedural y textos propios.
 No contiene assets, código ni nombres de The Settlers IV (Ubisoft/Blue Byte).
 
 ## Stack
@@ -13,25 +13,27 @@ No contiene assets, código ni nombres de The Settlers IV (Ubisoft/Blue Byte).
 ```bash
 npm install
 npm run dev      # http://localhost:3000  (juego en /play)
-npm test         # 8 tests unitarios (economía + territorio)
+npm test         # 68 tests unitarios (economía, caminos, población, rival…)
+npm run lint     # ESLint (hay avisos/errores previos pendientes)
 npm run build    # verificación prod (Turbopack + tsc)
 ```
 
 ## Controles
-- Clic en edificio → clic en loseta para construir · `ESC` cancela
-- Rueda = zoom · Arrastrar botón derecho = pan · `WASD`/flechas = mover
+- Clic en edificio → clic en loseta para construir · 🛤 Camino: clic o arrastra (clic en camino = quitar) · `ESC` cancela
+- Rueda = zoom suave · Arrastrar botón derecho = pan · `WASD`/flechas = mover · `Q`/`E` = zoom · Minimapa = viajar
 
-## Mecánicas (MVP v0.4.0)
-- 21 edificios, 16 recursos, 8 recetas encadenadas (madera→tablón, grano→harina→pan→minería, hierro+carbón→lingote→herramientas/armas)
-- Territorio: base + torres (guarnición) · Pioneros (próximo)
-- Militar: espadachines/arqueros N1-N3 + líder; fuerza fuera de casa ligada al valor económico + ornamentos x2
-- HUD React con stock en vivo vía `window.__stock`
+## Mecánicas (fases 1–4)
+- 22 edificios, 16 recursos, 8 recetas encadenadas (madera→tablón, grano→harina→pan, hierro+carbón→lingote→herramientas/armas)
+- Caminos trazables: los colonos los prefieren y van ×1.5; avisos ⚠ de producción parada
+- Población real: vivienda, comida (pan/pescado), moral, inmigración/emigración visible; reclutar viste colonos
+- Colonia rival IA con las mismas reglas: crece por orden, produce, recluta e incursiona; arrasar su almacén da la victoria
+- Territorio: base + torres · Militar: espadachines/arqueros + oleadas neutrales hasta 10 para ganar
+- Economía a 1 tick/s de pared (independiente de FPS), guardado localStorage v4, HUD React con stock/censo/rival en vivo
 
 ## Docs y checkpoints
-- `CHANGELOG.md` + `docs/devlog/001-scaffold.md`, `002-mvp.md`
-- Tags: `v0.1.0-scaffold`, `v0.2.0-map`, `v0.3.0-economy`, `v0.4.0-military`
-- Skills (skills.sh) en `.agents/skills/`: vercel-* (4), superpowers (5), phaser (7)
+- `CHANGELOG.md` + `docs/devlog/001…024-*` por fase
+- Ramas: `proto-b-widelands` (arte Widelands, proyecto Vercel B) y `proto-a-hibrida` (proyecto Vercel A)
 
 ## Aviso legal
-Clon **inspirado en mecánicas genéricas del género**, con assets originales.
+Inspirado en mecánicas genéricas del género, con assets originales.
 No afiliado a Ubisoft/Blue Byte.

@@ -27,16 +27,25 @@ const DIAMOND = `M ${W / 2} 0 L ${W} ${H / 2} L ${W / 2} ${H} L 0 ${H / 2} Z`;
 
 function diamondTile(seed, base, blotchColors, opts = {}) {
   const rnd = mulberry32(seed);
-  const n = opts.blotches ?? 26;
+  const n = opts.blotches ?? 46;
   let blobs = '';
   for (let i = 0; i < n; i++) {
     const x = rnd() * W;
     const y = rnd() * H;
     if (!inDiamond(x, y)) continue;
-    const r = 2 + rnd() * 5;
+    const r = 1.6 + rnd() * 5.4;
     const c = blotchColors[Math.floor(rnd() * blotchColors.length)];
-    const o = (0.22 + rnd() * 0.3).toFixed(2);
+    const o = (0.18 + rnd() * 0.34).toFixed(2);
     blobs += `<ellipse cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" rx="${r.toFixed(1)}" ry="${(r * 0.55).toFixed(1)}" fill="${c}" opacity="${o}" filter="url(#soft)"/>`;
+  }
+  // Micro-grano: puntitos que rompen el degradado plano en zoom cercano.
+  let grain = '';
+  for (let i = 0; i < 40; i++) {
+    const x = rnd() * W;
+    const y = rnd() * H;
+    if (!inDiamond(x, y)) continue;
+    const c = blotchColors[Math.floor(rnd() * blotchColors.length)];
+    grain += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(0.7 + rnd() * 1.1).toFixed(2)}" fill="${c}" opacity="0.35"/>`;
   }
   let streaks = '';
   for (let i = 0; i < (opts.streaks ?? 0); i++) {
@@ -64,11 +73,11 @@ function diamondTile(seed, base, blotchColors, opts = {}) {
     `<filter id="soft" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="1.3"/></filter></defs>` +
     `<g clip-path="url(#d)">` +
     `<rect width="${W}" height="${H}" fill="${base}"/>` +
-    `<polygon points="66,0 132,33 66,40 0,33" fill="#ffffff" opacity="0.07"/>` +
-    `<polygon points="0,33 66,40 66,66 0,33" fill="#000000" opacity="0.05"/>` +
-    blobs + streaks + cracks +
+    `<polygon points="66,0 132,33 66,40 0,33" fill="#ffffff" opacity="0.10"/>` +
+    `<polygon points="0,33 66,40 66,66 0,33" fill="#1a2b12" opacity="0.10"/>` +
+    `<ellipse cx="66" cy="33" rx="64" ry="31" fill="none" stroke="#000000" stroke-opacity="0.10" stroke-width="6" filter="url(#soft)"/>` +
+    blobs + grain + streaks + cracks +
     `</g>` +
-    `<path d="${DIAMOND}" fill="none" stroke="#000000" stroke-opacity="0.04" stroke-width="1"/>` +
     `</svg>`;
   return Buffer.from(svg);
 }
