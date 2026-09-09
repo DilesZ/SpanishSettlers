@@ -443,16 +443,27 @@ function wanderFirefly(scene: Phaser.Scene, st: AtmoState, f: Firefly): void {
 }
 
 function updateClouds(st: AtmoState, sky: SkyState): void {
+  const raining = isRainingNow();
   for (const c of st.clouds) {
     try {
       if (!c.cloud || c.cloud.active === false) continue;
       if (c.shade) c.shade.setAlpha(Math.max(0, c.shadeBase * (1 - sky.darkness * 0.75)));
+      if (raining) continue; // el módulo weather es dueño del tinte gris
       if (sky.isNight) c.cloud.setTint(NIGHT_CLOUD_TINT);
       else if (sky.overlayColor === DAWN_COLOR) c.cloud.setTint(DAWN_CLOUD_TINT);
       else c.cloud.clearTint();
     } catch {
       /* nube destruida: se ignora */
     }
+  }
+}
+
+/** Llueve ahora según el módulo weather (evita pelear por el tinte). */
+function isRainingNow(): boolean {
+  try {
+    return Boolean((window as unknown as { __weather?: { raining?: number | boolean } }).__weather?.raining);
+  } catch {
+    return false;
   }
 }
 

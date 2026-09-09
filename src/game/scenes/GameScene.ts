@@ -14,6 +14,10 @@ import { findRivalBase, lateRivalBuild, nextRivalBuild, rivalStartingStock, RIVA
 import { addRoad, createRoadNet, deserializeRoads, hasRoad, removeRoad, roadNeighbors, serializeRoads, tileCost, ROAD_SPEED_BONUS, type RoadNet } from '../systems/roads';
 import { initWaterFX, updateWaterFX, LEGACY_WATER_BLINK_ENABLED, type WaterFX } from '../fx/water';
 import { initAtmosphere, updateSky, registerCloud } from '../fx/atmosphere';
+import { initCameraGrade, setNightGrade, attachBuildingShadow, selectGlow, discardSelectGlow, glowGhost } from '../fx/postfx';
+import { initWeather, stopWeather, registerWeatherCloud, type Weather } from '../fx/weather';
+import { dustBurst, builtBurst, hitFlash, recruitRing, harvestSparkle, smokeColumn } from '../fx/vfx';
+import { computeEdges, placeEdges } from '../fx/edges';
 
 // Rama B: arte GPL de Widelands (ver docs/ATRIBUCION.md + wlArt.ts).
 const WL_TEX: Record<BuildingId, string> = {
@@ -28,6 +32,8 @@ const WL_TEX: Record<BuildingId, string> = {
 };
 
 const WL_SMOKE: Set<BuildingId> = new Set(['fundicion', 'herreria', 'panaderia', 'minaCarbon', 'minaHierro', 'minaOro', 'cabanaLenador']);
+/** Humo doméstico tenue (viviendas, cuartel, armería, torre). */
+const WL_SMOKE_SOFT: Set<BuildingId> = new Set(['residenciaS', 'residenciaM', 'residenciaL', 'cuartel', 'armeria', 'torre']);
 const MAP = ISLAND_SIZE;
 
 interface Placed { id: BuildingId; tx: number; ty: number; sprite: Phaser.GameObjects.Container; done: number; total: number; owner: Owner }
@@ -117,12 +123,16 @@ export class GameScene extends Phaser.Scene {
   private aiRaidT = 0;
   private aiRaids = 0;
   territoryRadius = 7;
+  private territoryFill?: Phaser.GameObjects.Ellipse;
+  private territoryPosts: Phaser.GameObjects.Image[] = [];
   center = { x: MAP / 2, y: MAP / 2 };
   jobs: ProductionJob[] = [];
   private hintText!: Phaser.GameObjects.Text;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
   private waterCells: { x: number; y: number; alt: boolean }[] = [];
   private waterFX: WaterFX | null = null;
+  private weather: Weather | null = null;
+  private selectHalo: Phaser.GameObjects.Image | null = null;
   private forestTiles: { x: number; y: number }[] = [];
   private shoreTiles: { x: number; y: number }[] = [];
   private hillTiles: { x: number; y: number }[] = [];
@@ -372,6 +382,7 @@ export class GameScene extends Phaser.Scene {
     this.setupAmbient();
     this.setupNight();
     initAtmosphere(this);
+    initCameraGrade(this);
     this.setupMapFrame();
     this.setupParticles();
     this.exposeBridge();
@@ -381,6 +392,8 @@ export class GameScene extends Phaser.Scene {
     }
     this.waterFX = initWaterFX(this, this.waterCells, (tx, ty) => this.iso(tx, ty));
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.waterFX?.stop());
+    this.weather = initWeather(this, (tx, ty) => this.iso(tx, ty), { waterCells: this.waterCells });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => stopWeather(this));
     this.time.addEvent({ delay: 6000, loop: true, callback: () => this.wheatTick() });
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.skyTick() });
     this.time.addEvent({ delay: 500, loop: true, callback: () => this.combatTick() });
@@ -463,8 +476,10 @@ export class GameScene extends Phaser.Scene {
     this.hoverMarker.setVisible(false);
 
     const c = this.iso(this.center.x, this.center.y);
-    this.add.circle(c.x, c.y - 8, this.territoryRadius * 68, 0xfbbf24, 0.07).setDepth(9390).setStrokeStyle(2, 0xfbbf24, 0.45);
+    this.territoryFill = this.add.ellipse(c.x, c.y - 8, this.territoryRadius * 136, this.territoryRadius * 68, 0xfbbf24, 0.06).setDepth(9390);
+    this.drawTerritoryPosts();
     this.placeFoam();
+    placeEdges(this, computeEdges(terrainAt, MAP), (tx, ty) => this.iso(tx, ty));
     this.placeMountainShades();
     // this.placeSparkles(); // sustituido por initWaterFX en create()
   }
@@ -691,6 +706,7 @@ export class GameScene extends Phaser.Scene {
    *  sintético inicial en (0,0) no debe expulsar la cámara al arrancar). */
   private edgeArmed = false;
   private ghost?: Phaser.GameObjects.Image | null;
+  private ghostRange?: Phaser.GameObjects.Graphics | null;
   private selectRing?: Phaser.GameObjects.Graphics | null;
   private mapFrame?: Phaser.GameObjects.Graphics | null;
 
@@ -729,11 +745,29 @@ export class GameScene extends Phaser.Scene {
     }
     const ok = this.canPlace(id, tx, ty);
     this.ghost.setTint(ok ? 0x88ff88 : 0xff6666);
+    glowGhost(this, this.ghost, ok);
+    // Las torres muestran su alcance (5 losetas) al colocar.
+    if (id === 'torre') {
+      if (!this.ghostRange) {
+        this.ghostRange = this.add.graphics().setDepth(9495);
+        if (this.minimap) this.minimap.ignore([this.ghostRange]);
+      }
+      const g = this.ghostRange;
+      g.clear();
+      g.fillStyle(ok ? 0xfbbf24 : 0xef4444, 0.1);
+      g.fillEllipse(x, y - 10, 660, 330);
+      g.lineStyle(2, ok ? 0xfbbf24 : 0xef4444, 0.6);
+      g.strokeEllipse(x, y - 10, 660, 330);
+    } else if (this.ghostRange) {
+      this.ghostRange.clear();
+    }
   }
 
   private clearGhost() {
     this.ghost?.destroy();
     this.ghost = null;
+    this.ghostRange?.destroy();
+    this.ghostRange = null;
   }
 
   private canPlace(id: BuildingId, tx: number, ty: number): boolean {
@@ -821,6 +855,22 @@ export class GameScene extends Phaser.Scene {
     this.roadDecals.set(k, c);
   }
 
+  /** Frontera del jugador: elipse tenue + postes con banderín (estilo del género). */
+  private drawTerritoryPosts() {
+    for (const post of this.territoryPosts) post.destroy();
+    this.territoryPosts = [];
+    const c = this.iso(this.center.x, this.center.y);
+    const r = this.territoryRadius * 68;
+    this.territoryFill?.setSize(r * 2, r).setPosition(c.x, c.y - 8);
+    const n = Phaser.Math.Clamp(Math.round(r / 18), 12, 40);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const post = this.add.image(c.x + Math.cos(a) * r, c.y - 8 + Math.sin(a) * (r / 2), 'post')
+        .setDepth(9391).setScale(1.4);
+      this.territoryPosts.push(post);
+    }
+  }
+
   /** Hojas, brasas y salpicaduras ambientales (vida sin coste de CPU). */
   private setupParticles() {
     // hojas que caen junto a un bosque aleatorio
@@ -878,12 +928,17 @@ export class GameScene extends Phaser.Scene {
     g.strokeEllipse(x, y - 10, 110, 44);
     this.tweens.add({ targets: g, alpha: 0.35, duration: 600, yoyo: true, repeat: -1 });
     this.selectRing = g;
+    discardSelectGlow(this, this.selectHalo);
+    this.selectHalo = selectGlow(this, x, y - 10);
+    if (this.selectHalo && this.minimap) this.minimap.ignore([this.selectHalo]);
     this.panTarget = { x, y };
   }
 
   private hideSelectRing() {
     this.selectRing?.destroy();
     this.selectRing = null;
+    discardSelectGlow(this, this.selectHalo);
+    this.selectHalo = null;
   }
 
   /** Marco del viewport principal dibujado SOLO en el minimapa. */
@@ -945,6 +1000,7 @@ export class GameScene extends Phaser.Scene {
       s.starsAlpha = 0;
     }
     updateSky(this, s); // publica __sky + faroles + estrellas + luciérnagas
+    setNightGrade(this, s.isNight);
   }
 
   /** Parcelas de trigo alrededor de cada granja: crecen y se cosechan (+1 grano). */
@@ -969,6 +1025,7 @@ export class GameScene extends Phaser.Scene {
       if (p.stageIdx >= WL_WHEAT_ORDER.length) {
         p.stageIdx = 0;
         harvested++;
+        harvestSparkle(this, p.sprite.x, p.sprite.y - 20);
       }
       const stage = WL_WHEAT_ORDER[p.stageIdx];
       const art = WL_WHEAT[stage];
@@ -1463,6 +1520,7 @@ export class GameScene extends Phaser.Scene {
         this.time.delayedCall(230, () => {
           proj.destroy();
           if (!target.sprite.active) return;
+          hitFlash(target.sprite);
           if (applyDamage(target, towerDps())) this.killEnemy(target);
           playSfx('chop');
         });
@@ -1483,6 +1541,7 @@ export class GameScene extends Phaser.Scene {
       }
       w.foe = best;
       if (best) {
+        hitFlash(best.sprite);
         if (applyDamage(best, soldierDps(1) * 0.5)) this.killEnemy(best);
         // represalia del incursor
         w.hp -= best.dmg * 0.5;
@@ -1506,6 +1565,8 @@ export class GameScene extends Phaser.Scene {
         } else {
           const { x, y } = this.iso(targetB.tx, targetB.ty);
           this.drawBar(rec.bar, x, y - 80, rec.hp / rec.maxHp, 0xfbbf24);
+          hitFlash(targetB.sprite);
+          if (rec.hp / rec.maxHp < 0.35 && Math.random() < 0.3) smokeColumn(this, x, y - 40);
         }
       }
     }
@@ -1545,6 +1606,8 @@ export class GameScene extends Phaser.Scene {
           const { x, y } = this.iso(p.tx, p.ty);
           this.drawBar(rec.bar, x, y - 80, rec.hp / rec.maxHp, 0xfbbf24);
           this.tweens.add({ targets: p.sprite, x: x + 3, duration: 60, yoyo: true, repeat: 3, onComplete: () => p.sprite.setPosition(x, y) });
+          hitFlash(p.sprite);
+          if (rec.hp / rec.maxHp < 0.35 && Math.random() < 0.3) smokeColumn(this, x, y - 40);
         }
       }
     }
@@ -1558,6 +1621,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private killEnemy(e: Enemy) {
+    dustBurst(this, e.sprite.x, e.sprite.y - 10);
     this.tweens.add({ targets: e.sprite, alpha: 0, scale: 0.1, duration: 300, onComplete: () => e.sprite.destroy() });
     e.shadow.destroy();
     e.bar.destroy();
@@ -1729,6 +1793,7 @@ export class GameScene extends Phaser.Scene {
         }
       }
       this.updateHud();
+      this.drawTerritoryPosts();
       playSfx('confirm');
       this.hintText?.setText('💾 Partida cargada').setY(44);
       this.time.delayedCall(3000, () => this.hintText.setText(''));
@@ -1742,6 +1807,9 @@ export class GameScene extends Phaser.Scene {
     if (i < 0) return;
     const [p] = this.placed.splice(i, 1);
     p.sprite.destroy();
+    const { x: dx, y: dy } = this.iso(tx, ty);
+    dustBurst(this, dx, dy, { count: 10 });
+    smokeColumn(this, dx, dy - 40);
     this.buildingTiles.delete(`${tx},${ty}`);
     const rec = this.buildingHp.get(`${tx},${ty}`);
     rec?.bar.destroy();
@@ -1823,6 +1891,7 @@ export class GameScene extends Phaser.Scene {
         this.assignJob(volunteer);
       }
       playSfx('sword');
+      recruitRing(this, this.iso(cuartel.tx, cuartel.ty).x, this.iso(cuartel.tx, cuartel.ty).y - 20);
       this.updateHud();
       return true;
     }
@@ -1835,6 +1904,7 @@ export class GameScene extends Phaser.Scene {
     const w = this.makeWalker(s, shadow, role, 'settler');
     this.assignJob(w);
     playSfx('sword');
+    recruitRing(this, x, y - 20);
     this.updateHud();
     return true;
   }
@@ -2066,7 +2136,6 @@ export class GameScene extends Phaser.Scene {
     }
     const depth = 6000 + ty * 4;
     const parts: Phaser.GameObjects.GameObject[] = [];
-    parts.push(this.add.image(0, -2, 'shadow').setAlpha(0.75).setScale(3.0));
     this.surroundings(id, x, y, depth, parts);
     // ancla por hotspot oficial de Widelands
     const ox = art.hotspot[0] / art.w;
@@ -2093,6 +2162,7 @@ export class GameScene extends Phaser.Scene {
       parts.push(g);
     }
     const c = this.add.container(x, y, parts).setDepth(depth);
+    attachBuildingShadow(c, art.w * scale, art.h * scale);
     img.setAlpha(0); // se revela al terminar la obra
     // Etapa de obra: si hay sheet de construcción oficial se muestra creciendo;
     // si no, andamio procedural + edificio atenuado.
@@ -2119,18 +2189,23 @@ export class GameScene extends Phaser.Scene {
       onComplete: () => {
         buildFx?.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, scale);
         playSfx('built');
+        builtBurst(this, x, y);
         if (id === 'puerto') this.spawnShip(tx, ty);
       },
     });
     this.placed.push({ id, tx, ty, sprite: c, done: 0, total: def.tiempoConstruccionMs, owner });
     this.buildingTiles.add(`${tx},${ty}`);
     if (WL_SMOKE.has(id)) this.addSmoke(x, y - art.h * scale * 0.85, depth + 1);
+    else if (WL_SMOKE_SOFT.has(id)) this.addSmoke(x, y - art.h * scale * 0.85, depth + 1, 1700, 0.7);
     if (id === 'granja' && owner === 'player') this.plantWheat(x, y, depth);
     // farol nocturno sobre la puerta
     const lamp = this.add.image(x, y - art.h * scale * 0.55, 'glow')
       .setDepth(depth + 2).setScale(0.9).setAlpha(0).setBlendMode(Phaser.BlendModes.ADD);
     this.lanterns.push(lamp);
-    if (id === 'torre' && owner === 'player') this.territoryRadius += 1.5;
+    if (id === 'torre' && owner === 'player') {
+      this.territoryRadius += 1.5;
+      this.drawTerritoryPosts();
+    }
     if (id === 'cuartel' && owner === 'player') {
       if (!free) playSfx('sword');
       for (const t of ['soldier', 'archer']) {
@@ -2185,13 +2260,14 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private addSmoke(x: number, y: number, depth: number) {
+  /** Humo de chimenea/forja. rateMs alto = humo doméstico tenue. */
+  private addSmoke(x: number, y: number, depth: number, rateMs = 850, alphaMul = 1) {
     const wind = 10; // deriva constante hacia el este
     const puff = () => {
       if (!this.scene.isActive()) return;
       const dx = Phaser.Math.Between(-4, 4);
-      const halo = this.add.circle(x + dx, y, 6, 0x9aa0aa, 0.35).setDepth(depth);
-      const core = this.add.circle(x + dx, y - 2, 3.4, 0xf5f0e8, 0.6).setDepth(depth + 0.1);
+      const halo = this.add.circle(x + dx, y, 6, 0x9aa0aa, 0.35 * alphaMul).setDepth(depth);
+      const core = this.add.circle(x + dx, y - 2, 3.4, 0xf5f0e8, 0.6 * alphaMul).setDepth(depth + 0.1);
       for (const [p, rise, drift, grow] of [[halo, -34, wind + 8, 2.6], [core, -26, wind + 4, 2.0]] as const) {
         this.tweens.add({
           targets: p, y: y + rise, x: x + dx + drift, alpha: 0, scale: grow,
@@ -2199,7 +2275,7 @@ export class GameScene extends Phaser.Scene {
         });
       }
     };
-    this.time.addEvent({ delay: 850, loop: true, callback: puff });
+    this.time.addEvent({ delay: rateMs, loop: true, callback: puff });
   }
 
   private setupAmbient() {
@@ -2209,6 +2285,7 @@ export class GameScene extends Phaser.Scene {
       const cloud = this.add.image(x, y, 'cloud').setDepth(9300).setAlpha(0.8).setScale(1.6 + Math.random() * 1.4);
       const shade = this.add.ellipse(x, y + 300, 200, 55, 0x000000, 0.1).setDepth(9390);
       registerCloud(this, cloud, shade, 0.1);
+      registerWeatherCloud(this, cloud);
       const speed = Phaser.Math.Between(60000, 110000);
       this.tweens.add({
         targets: [cloud], x: x + 3200, duration: speed, repeat: -1,

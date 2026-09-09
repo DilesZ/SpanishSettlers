@@ -13,6 +13,7 @@ export class BootScene extends Phaser.Scene {
     this.makeProps();
     this.makeFx();
     this.makeAtmosphere();
+    this.makeEdges();
     this.scene.start('game');
   }
 
@@ -109,6 +110,21 @@ export class BootScene extends Phaser.Scene {
     g.fillCircle(66, 26, 13);
     g.fillEllipse(48, 32, 72, 16);
     g.generateTexture('cloud', 96, 44);
+    g.destroy();
+
+    // Poste fronterizo con banderín ámbar (territorio del jugador).
+    g = this.make.graphics({ x: 0, y: 0 }, false);
+    g.fillStyle(0x000000, 0.25);
+    g.fillEllipse(8, 30, 12, 4);
+    g.fillStyle(0x6b4a2a, 1);
+    g.fillRect(6, 8, 4, 22);
+    g.fillStyle(0x8a6538, 1);
+    g.fillRect(6, 8, 2, 22);
+    g.fillStyle(0xfbbf24, 1);
+    g.fillTriangle(10, 8, 10, 16, 22, 12);
+    g.fillStyle(0xf59e0b, 1);
+    g.fillTriangle(10, 12, 10, 16, 17, 14);
+    g.generateTexture('post', 24, 32);
     g.destroy();
 
     g = this.make.graphics({ x: 0, y: 0 }, false);
@@ -214,5 +230,33 @@ export class BootScene extends Phaser.Scene {
     g.fillCircle(6, 6, 2.2);
     g.generateTexture('firefly', 12, 12);
     g.destroy();
+  }
+
+  /**
+   * Bandas de transición de terreno (docs/devlog/031). 100% procedurales y
+   * originales: elipses concéntricas que forman un degradado suave alargado
+   * (64x32). GameScene las coloca con placeEdges (fx/edges.ts) desplazadas
+   * hacia el vecino que las causa y rotadas con setRotation, como los
+   * stubs de los caminos. No toca ninguna textura existente.
+   */
+  private makeEdges() {
+    // Elipse suave genérica: anillos tenues + núcleo más denso.
+    const blob = (key: string, color: number, coreAlpha: number) => {
+      const g = this.make.graphics({ x: 0, y: 0 }, false);
+      for (let i = 4; i > 0; i--) {
+        g.fillStyle(color, 0.07);
+        g.fillEllipse(32, 16, i * 16, i * 8);
+      }
+      g.fillStyle(color, coreAlpha);
+      g.fillEllipse(32, 16, 34, 15);
+      g.generateTexture(key, 64, 32);
+      g.destroy();
+    };
+    // Orilla húmeda: fría y azulada (arena mojada junto al agua).
+    blob('shore-shade', 0x2e4a5a, 0.5);
+    // Sotobosque: verde oscuro (hierba a la sombra del arbolado).
+    blob('forest-shade', 0x14331c, 0.5);
+    // Sombra de relieve: gris pizarra (tierra junto a la montaña).
+    blob('cliff-shade', 0x23232e, 0.55);
   }
 }
