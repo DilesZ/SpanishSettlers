@@ -13,7 +13,7 @@ No contiene assets, código ni nombres de The Settlers IV (Ubisoft/Blue Byte).
 ```bash
 npm install
 npm run dev      # http://localhost:3000  (juego en /play)
-npm test         # 68 tests unitarios (economía, caminos, población, rival…)
+npm test         # 77 tests unitarios (economía, caminos, población, rival…)
 npm run lint     # ESLint (hay avisos/errores previos pendientes)
 npm run build    # verificación prod (Turbopack + tsc)
 ```

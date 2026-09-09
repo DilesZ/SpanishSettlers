@@ -12,6 +12,8 @@ import { missingInputs, payCost, tickAutoProducers, tickJob, type ProductionJob,
 import { foodPerTick, growthPerTick, housingFor, moraleOf } from '../systems/population';
 import { findRivalBase, lateRivalBuild, nextRivalBuild, rivalStartingStock, RIVAL_ORDER, type Owner } from '../systems/rival';
 import { addRoad, createRoadNet, deserializeRoads, hasRoad, removeRoad, roadNeighbors, serializeRoads, tileCost, ROAD_SPEED_BONUS, type RoadNet } from '../systems/roads';
+import { initWaterFX, updateWaterFX, LEGACY_WATER_BLINK_ENABLED, type WaterFX } from '../fx/water';
+import { initAtmosphere, updateSky, registerCloud } from '../fx/atmosphere';
 
 // Rama B: arte GPL de Widelands (ver docs/ATRIBUCION.md + wlArt.ts).
 const WL_TEX: Record<BuildingId, string> = {
@@ -120,6 +122,7 @@ export class GameScene extends Phaser.Scene {
   private hintText!: Phaser.GameObjects.Text;
   private groundLayer!: Phaser.Tilemaps.TilemapLayer;
   private waterCells: { x: number; y: number; alt: boolean }[] = [];
+  private waterFX: WaterFX | null = null;
   private forestTiles: { x: number; y: number }[] = [];
   private shoreTiles: { x: number; y: number }[] = [];
   private hillTiles: { x: number; y: number }[] = [];
@@ -368,11 +371,16 @@ export class GameScene extends Phaser.Scene {
     this.spawnCritters();
     this.setupAmbient();
     this.setupNight();
+    initAtmosphere(this);
     this.setupMapFrame();
     this.setupParticles();
     this.exposeBridge();
     this.econLast = performance.now();
-    this.time.addEvent({ delay: 700, loop: true, callback: () => this.animateWater() });
+    if (LEGACY_WATER_BLINK_ENABLED) {
+      this.time.addEvent({ delay: 700, loop: true, callback: () => this.animateWater() });
+    }
+    this.waterFX = initWaterFX(this, this.waterCells, (tx, ty) => this.iso(tx, ty));
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.waterFX?.stop());
     this.time.addEvent({ delay: 6000, loop: true, callback: () => this.wheatTick() });
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.skyTick() });
     this.time.addEvent({ delay: 500, loop: true, callback: () => this.combatTick() });
@@ -458,7 +466,7 @@ export class GameScene extends Phaser.Scene {
     this.add.circle(c.x, c.y - 8, this.territoryRadius * 68, 0xfbbf24, 0.07).setDepth(9390).setStrokeStyle(2, 0xfbbf24, 0.45);
     this.placeFoam();
     this.placeMountainShades();
-    this.placeSparkles();
+    // this.placeSparkles(); // sustituido por initWaterFX en create()
   }
 
   /** Sombra al sur de cada montaña: relieve sin geometría extra. */
@@ -575,6 +583,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private animateWater() {
+    if (!LEGACY_WATER_BLINK_ENABLED) return;
     if (!this.groundLayer) return;
     for (const w of this.waterCells) {
       if ((w.x + w.y) % 2 === 0) continue; // solo la mitad: parpadeo sutil
@@ -935,10 +944,7 @@ export class GameScene extends Phaser.Scene {
       s.lanternAlpha = 0;
       s.starsAlpha = 0;
     }
-    // el div HTML de GameCanvas lee esto para el tinte (evita misterios de cámara)
-    (window as unknown as { __sky?: object }).__sky = { color: s.overlayColor, alpha: s.overlayAlpha };
-    for (const st of this.stars) st.setAlpha(s.starsAlpha * (0.4 + Math.random() * 0.6));
-    for (const l of this.lanterns) l.setAlpha(s.lanternAlpha);
+    updateSky(this, s); // publica __sky + faroles + estrellas + luciérnagas
   }
 
   /** Parcelas de trigo alrededor de cada granja: crecen y se cosechan (+1 grano). */
@@ -2202,6 +2208,7 @@ export class GameScene extends Phaser.Scene {
       const y = Phaser.Math.Between(-500, 500);
       const cloud = this.add.image(x, y, 'cloud').setDepth(9300).setAlpha(0.8).setScale(1.6 + Math.random() * 1.4);
       const shade = this.add.ellipse(x, y + 300, 200, 55, 0x000000, 0.1).setDepth(9390);
+      registerCloud(this, cloud, shade, 0.1);
       const speed = Phaser.Math.Between(60000, 110000);
       this.tweens.add({
         targets: [cloud], x: x + 3200, duration: speed, repeat: -1,
@@ -2748,5 +2755,6 @@ export class GameScene extends Phaser.Scene {
     this.updateShips(dt);
     this.updateEnemies(dt);
     this.drawMapFrame();
+    updateWaterFX(this.waterFX);
   }
 }

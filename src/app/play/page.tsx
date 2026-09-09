@@ -4,39 +4,12 @@ import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { playSfx, unlockAudio } from '@/game/audio';
 import { isMusicEnabled, setMusicEnabled, startMusic } from '@/game/music';
-import { BUILDINGS, type BuildingId, type ResourceId } from '@/game/data/buildings';
+import type { BuildingId } from '@/game/data/buildings';
+import { BuildMenu } from '@/components/BuildMenu';
+import { ColonyPanel, EndingOverlay, InspectCard, ResourceBar, TopBar } from '@/components/HudPanels';
 
 // Dynamic import: el canvas pesado solo en cliente (skill bundle-dynamic-imports).
 const GameCanvas = dynamic(() => import('@/components/GameCanvas'), { ssr: false });
-
-// Pack de arte por proyecto Vercel (NEXT_PUBLIC_PACK=a|b). En local (sin env)
-// se usa 'b' (arte wl commiteado) para evitar 404s con fallback parpadeante.
-const PACK = process.env.NEXT_PUBLIC_PACK === 'a' ? 'a' : 'b';
-
-const ORDER: BuildingId[] = [
-  'cabanaLenador', 'aserradero', 'cantera', 'residenciaS', 'residenciaM', 'residenciaL',
-  'granja', 'molino', 'panaderia', 'pozo', 'pesqueria',
-  'minaCarbon', 'minaHierro', 'minaOro', 'fundicion', 'herreria', 'armeria',
-  'cuartel', 'torre', 'ornamento',
-  ...(PACK === 'b' ? ['puerto' as BuildingId] : []),
-];
-
-const iconFor = (id: BuildingId) =>
-  PACK === 'b' ? `/assets/wl/icons/${id}.png` : `/assets/buildings/icons/${id}.png`;
-
-const iconFallback = (id: BuildingId) =>
-  PACK === 'b' ? `/assets/buildings/icons/${id}.png` : `/assets/wl/icons/${id}.png`;
-
-const resIconFor = (k: ResourceId) =>
-  PACK === 'b' ? `/assets/wl/icons/res-${k}.png` : null;
-
-const onImgFallback = (fb: string) => (e: React.SyntheticEvent<HTMLImageElement>) => {
-  const t = e.currentTarget;
-  if (!t.dataset.fb && fb) {
-    t.dataset.fb = '1';
-    t.src = fb;
-  }
-};
 
 interface Inspect {
   id: BuildingId;
@@ -63,8 +36,6 @@ interface Pop {
   morale: number;
   eating: number;
 }
-
-const moraleFace = (m: number) => (m >= 75 ? '😊' : m >= 50 ? '🙂' : m >= 35 ? '😐' : '😟');
 
 export default function PlayPage() {
   const [stock, setStock] = useState<Record<string, number> | null>(null);
@@ -162,6 +133,12 @@ export default function PlayPage() {
     setInspect(null);
   };
 
+  const recruit = () => {
+    unlockAudio();
+    const w = window as unknown as { __game?: { recruit: () => boolean } };
+    w.__game?.recruit();
+  };
+
   const doSave = () => {
     unlockAudio();
     const at = game()?.save() ?? null;
@@ -174,187 +151,81 @@ export default function PlayPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#0b1410] text-amber-50">
-      <header className="flex items-center justify-between border-b border-amber-200/15 px-4 py-3">
-        <a href="/" className="text-sm text-amber-200/80 hover:text-amber-100">← Volver</a>
-        <h1 className="text-lg font-bold tracking-wide">SpanishSettlers — partida web</h1>
-        <div className="flex items-center gap-2 text-xs text-amber-200/70">
-          <span className="hidden md:inline">Clic en edificio = info · Minimapa = viajar</span>
-          <button onClick={toggleMusic} className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/10" title="Música ambiental">
-            {music ? '♪ On' : '♪ Off'}
-          </button>
-          <button onClick={doSave} className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/10">💾 Guardar{savedAt ? ` (${savedAt})` : ''}</button>
-          <button onClick={doLoad} className="rounded-full border border-white/20 px-3 py-1 hover:bg-white/10">📂 Cargar</button>
-        </div>
-      </header>
+    <main className="min-h-screen bg-[#0b1410] font-sans text-amber-50">
+      {/* Atmósfera: resplandores verdes/noche + veta ámbar (solo CSS, sin assets) */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 bg-[radial-gradient(900px_420px_at_15%_-5%,rgba(251,191,36,0.08),transparent),radial-gradient(1000px_500px_at_90%_10%,rgba(34,197,94,0.10),transparent),radial-gradient(700px_600px_at_50%_110%,rgba(120,53,15,0.12),transparent)]" />
 
-      {stock && (
-        <div className="flex flex-wrap gap-2 px-4 py-2 text-xs">
-          {(Object.entries(stock) as [ResourceId, number][]).map(([k, v]) => (
-            <span key={k} className="flex items-center gap-1 rounded-full bg-white/10 px-2 py-1">
-              {resIconFor(k) && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={resIconFor(k)!} alt={k} width={16} height={16} className="h-4 w-4" onError={onImgFallback('')} />
-              )}
-              <span className="text-white/60">{k}:</span> <b>{v}</b>
-            </span>
-          ))}
-        </div>
-      )}
+      <TopBar music={music} savedAt={savedAt} onToggleMusic={toggleMusic} onSave={doSave} onLoad={doLoad} />
 
-      <div className="px-4"><GameCanvas /></div>
+      <div className="relative mx-auto w-full max-w-[1440px] px-3 pb-8 md:px-5">
+        <ResourceBar stock={stock} />
 
-      {ending && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-          <div className="max-w-md rounded-2xl border border-amber-300/40 bg-[#141b12] p-8 text-center">
-            <div className="text-5xl">{ending.status === 'victory' ? '🏆' : '💀'}</div>
-            <h2 className="mt-2 text-2xl font-black">
-              {ending.status === 'victory' ? '¡Victoria!' : 'Derrota'}
-            </h2>
-            <p className="mt-2 text-sm text-white/70">
-              {ending.status === 'victory'
-                ? `Rechazaste ${ending.wave} oleadas y tu colonia perdura.`
-                : 'Tu almacén ha caído. La colonia se dispersa...'}
-            </p>
-            <div className="mt-3 flex justify-center gap-3 text-xs text-white/80">
-              <span>⚔ {ending.kills} bajas</span>
-              <span>🏠 {ending.buildings} edificios</span>
-              <span>⏱ {Math.floor(ending.timeSec / 60)}:{String(ending.timeSec % 60).padStart(2, '0')}</span>
-            </div>
-            <button
-              onClick={() => window.location.reload()}
-              className="mt-5 rounded-full bg-amber-300 px-6 py-2 text-sm font-bold text-black hover:bg-amber-200"
-            >
-              ↻ Jugar de nuevo
-            </button>
-          </div>
-        </div>
-      )}
-
-      {objectives.length > 0 && (
-        <section className="mx-4 mt-2 rounded-xl border border-white/10 bg-white/5 p-3 text-xs">
-          <div className="mb-1 font-bold text-amber-200">🏆 Objetivos ({objectives.filter((o) => o.done).length}/{objectives.length})</div>
-          <div className="flex flex-wrap gap-2">
-            {objectives.map((o) => (
-              <span key={o.id} className={`rounded-full px-2 py-1 ${o.done ? 'bg-green-700/40 text-green-200 line-through' : 'bg-white/10 text-white/80'}`}>
-                {o.done ? '✓ ' : '○ '}{o.text}
-              </span>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {pop && (
-        <section className="mx-4 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs">
-          <span title="Población / vivienda" className={pop.pop >= pop.cap ? 'font-bold text-red-300' : 'text-white/85'}>
-            👥 {pop.pop}/{pop.cap}
-          </span>
-          <span title="Moral de la colonia" className="text-white/85">
-            {moraleFace(pop.morale)} {pop.morale}
-          </span>
-          <span title="Comida consumida por segundo" className="text-white/60">
-            🍞 −{pop.eating.toFixed(1)}/s
-          </span>
-          {pop.pop >= pop.cap && (
-            <span className="font-semibold text-red-300">⚠ Sin vivienda: no crece</span>
-          )}
-          {stock && (stock.pan ?? 0) + (stock.pez ?? 0) <= 0.5 && (
-            <span className="font-semibold text-red-300">⚠ Sin comida: hambre</span>
-          )}
-        </section>
-      )}
-
-      {stalls.length > 0 && (
-        <section className="mx-4 mt-2 rounded-xl border border-red-400/40 bg-red-500/10 p-3 text-xs">
-          <div className="mb-1 font-bold text-red-200">⚠ Producción parada ({stalls.length})</div>
-          <div className="flex flex-wrap gap-2">
-            {stalls.map((s) => (
-              <span key={`${s.tx},${s.ty}`} className="rounded-full bg-red-900/40 px-2 py-1 text-red-100">
-                {s.nombre}: falta {s.faltan.join(', ') || '—'}
-              </span>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {inspect && (
-        <section className="mx-4 mt-2 flex items-center gap-3 rounded-xl border border-amber-300/40 bg-amber-300/10 p-3 text-sm">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={iconFor(inspect.id)} alt="" width={40} height={40} className="h-10 w-10 rounded bg-black/40" onError={onImgFallback(iconFallback(inspect.id))} />
-          <div className="flex-1">
-            <div className="font-bold">{inspect.nombre} <span className="ml-1 rounded bg-white/10 px-1 text-[10px] text-white/60">{inspect.categoria}</span>
-              {inspect.bando === 'rival' && (
-                <span className="ml-1 rounded bg-red-500/30 px-1 text-[10px] font-bold text-red-200">⚔ Rival</span>
-              )}
-            </div>
-            <div className="text-white/70">{inspect.descripcion}</div>
-            {inspect.receta && (
-              <div className="mt-1 text-amber-200/90">
-                Produce: {inspect.receta.in.map(([k, v]) => `${v}×${k}`).join(' + ') || '—'} → {inspect.receta.out.map(([k, v]) => `${v}×${k}`).join(' + ')}
-                {inspect.produciendo ? ' ●' : ' ○'}
+        <div className="mt-3 grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
+          {/* Columna principal: mapa + inspección */}
+          <div className="min-w-0 space-y-3">
+            <section aria-label="Mapa de la colonia" className="overflow-hidden rounded-2xl border border-amber-200/20 bg-[#0d1f16] shadow-[0_24px_60px_-24px_rgba(0,0,0,0.9)]">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-white/[0.07] bg-white/[0.03] px-3 py-2 md:px-4">
+                <span aria-hidden className="flex gap-1.5">
+                  <i className="h-2.5 w-2.5 rounded-full bg-red-400/70" />
+                  <i className="h-2.5 w-2.5 rounded-full bg-amber-300/80" />
+                  <i className="h-2.5 w-2.5 rounded-full bg-emerald-400/70" />
+                </span>
+                <p className="text-xs font-bold tracking-wide text-amber-100/85">
+                  🗺 Isla principal
+                </p>
+                <p className="ml-auto hidden text-[11px] text-amber-100/55 sm:block">
+                  Arrastra para mover · Rueda para zoom · Clic en edificio = info
+                </p>
+                {(selected || roadMode) && (
+                  <p role="status" className="rounded-full border border-amber-300/40 bg-amber-300/10 px-2.5 py-0.5 text-[11px] font-bold text-amber-100">
+                    {selected ? `🧱 Colocando: ${selected}` : '🛤 Trazando camino (ESC termina)'}
+                  </p>
+                )}
               </div>
-            )}
-            {inspect.faltan && inspect.faltan.length > 0 && (
-              <div className="mt-1 font-semibold text-red-300">
-                ⚠ Parado: falta {inspect.faltan.join(', ')}
+              <div className="p-2 md:p-2.5">
+                <GameCanvas />
               </div>
-            )}
-            {inspect.id === 'cuartel' && (
-              <button
-                onClick={() => {
-                  unlockAudio();
-                  const w = window as unknown as { __game?: { recruit: () => boolean } };
-                  w.__game?.recruit();
-                }}
-                className="mt-2 rounded-full bg-red-700/60 px-3 py-1 text-xs font-bold hover:bg-red-600/60"
-              >
-                ⚔ Reclutar (1⚔ + 1🍞)
-              </button>
+            </section>
+
+            {inspect && (
+              <InspectCard inspect={inspect} onClose={() => setInspect(null)} onRecruit={recruit} />
             )}
           </div>
-          <button onClick={() => setInspect(null)} className="rounded-full border border-white/20 px-3 py-1 text-xs hover:bg-white/10">Cerrar</button>
-        </section>
-      )}
 
-      <section className="px-4 py-3">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <h2 className="text-sm font-semibold text-amber-200">
-            Construir {selected ? `→ ${BUILDINGS[selected].nombre} (clic en una loseta)` : roadMode ? '→ Camino (clic o arrastra, ESC termina)' : '(elige un edificio)'}
-          </h2>
-          <button
-            onClick={startRoad}
-            title="Traza caminos: los colonos los prefieren y van más rápido por ellos"
-            className={`rounded-full border px-3 py-1 text-xs font-bold transition ${roadMode ? 'border-amber-300 bg-amber-300/20 text-amber-100' : 'border-white/15 bg-white/5 text-white/80 hover:bg-white/10'}`}
-          >
-            🛤 Camino
-          </button>
-          {rival !== null && rival > 0 && (
-            <span title="Edificios de la colonia rival" className="rounded-full border border-red-400/40 bg-red-500/10 px-3 py-1 text-xs font-bold text-red-200">
-              ⚔ Rival: {rival}
-            </span>
-          )}
+          {/* Columna lateral: estado + ayuda */}
+          <aside className="min-w-0 space-y-3">
+            <ColonyPanel objectives={objectives} pop={pop} stalls={stalls} stock={stock} />
+            <section aria-label="Ayuda rápida" className="rounded-xl border border-amber-200/15 bg-gradient-to-b from-white/[0.07] to-white/[0.02] p-4">
+              <h2 className="text-[11px] font-bold tracking-[0.18em] text-amber-200/90 uppercase">
+                🧭 Guía del colono
+              </h2>
+              <ol className="mt-2 space-y-1.5 text-xs leading-5 text-amber-50/85">
+                <li><b className="text-amber-200">1.</b> Tala y cantea: cabaña + cantera primero.</li>
+                <li><b className="text-amber-200">2.</b> Come: granja → molino → panadería + pozo.</li>
+                <li><b className="text-amber-200">3.</b> Forja: minas → fundición → armería → cuartel.</li>
+                <li><b className="text-amber-200">4.</b> Une todo con 🛤 caminos: aceleran colonos.</li>
+                <li><b className="text-amber-200">5.</b> Vigila ⚠ paradas y guarnece torres: el rival ataca.</li>
+              </ol>
+            </section>
+          </aside>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-          {ORDER.map((id) => (
-            <button
-              key={id}
-              onClick={() => build(id)}
-              className={`flex gap-2 rounded-lg border p-2 text-left text-xs transition ${selected === id ? 'border-amber-300 bg-amber-300/15' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}
-              title={BUILDINGS[id].descripcion}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={iconFor(id)} alt="" width={34} height={34} className="h-[34px] w-[34px] shrink-0 rounded bg-black/40" onError={onImgFallback(iconFallback(id))} />
-              <span>
-                <div className="font-bold">{BUILDINGS[id].nombre}</div>
-                <div className="text-white/60">{BUILDINGS[id].descripcion}</div>
-                <div className="mt-1 text-amber-200/80">
-                  {Object.entries(BUILDINGS[id].coste).map(([k, v]) => `${k}:${v}`).join(' · ') || 'gratis'}
-                </div>
-              </span>
-            </button>
-          ))}
-        </div>
-      </section>
+
+        <BuildMenu
+          selected={selected}
+          roadMode={roadMode}
+          rival={rival}
+          stock={stock}
+          onBuild={build}
+          onRoad={startRoad}
+        />
+
+        <footer className="mt-4 text-center text-[11px] leading-5 text-amber-100/45">
+          Arte de edificios, colonos y fauna © Widelands Development Team (GPL-2.0+). Proyecto sin
+          afiliación con Ubisoft/Blue Byte.
+        </footer>
+      </div>
+
+      <EndingOverlay ending={ending} />
     </main>
   );
 }

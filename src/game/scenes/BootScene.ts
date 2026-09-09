@@ -12,6 +12,7 @@ export class BootScene extends Phaser.Scene {
     this.makeNature();
     this.makeProps();
     this.makeFx();
+    this.makeAtmosphere();
     this.scene.start('game');
   }
 
@@ -164,5 +165,54 @@ export class BootScene extends Phaser.Scene {
     s.fillTriangle(6, 26, 90, 26, 48, 4);
     s.generateTexture('scaffold', 96, 92);
     s.destroy();
+  }
+
+  /**
+   * Texturas de atmósfera (rama luz-atmósfera, docs/devlog/026).
+   * 100% procedurales y originales: degradados concéntricos dibujados
+   * con Graphics. No toca ninguna textura existente.
+   */
+  private makeAtmosphere() {
+    // Halo cálido grande para faroles (128x128, centro suave).
+    let g = this.make.graphics({ x: 0, y: 0 }, false);
+    for (let i = 8; i > 0; i--) {
+      g.fillStyle(0xffb45e, 0.05);
+      g.fillCircle(64, 64, i * 8);
+    }
+    g.fillStyle(0xffdca0, 0.35);
+    g.fillCircle(64, 64, 10);
+    g.generateTexture('lantern-halo', 128, 128);
+    g.destroy();
+
+    // Charco de luz elíptico para el suelo bajo cada farol (96x48).
+    g = this.make.graphics({ x: 0, y: 0 }, false);
+    for (let i = 8; i > 0; i--) {
+      g.fillStyle(0xffc873, 0.055);
+      g.fillEllipse(48, 24, i * 12, i * 6);
+    }
+    g.fillStyle(0xffe2a8, 0.3);
+    g.fillEllipse(48, 24, 22, 11);
+    g.generateTexture('light-pool', 96, 48);
+    g.destroy();
+
+    // Sombra radial suave genérica (para penumbras bajo aleros, copas...).
+    g = this.make.graphics({ x: 0, y: 0 }, false);
+    for (let i = 8; i > 0; i--) {
+      g.fillStyle(0x000000, 0.05);
+      g.fillCircle(32, 32, i * 4);
+    }
+    g.fillStyle(0x000000, 0.22);
+    g.fillCircle(32, 32, 9);
+    g.generateTexture('soft-shadow', 64, 64);
+    g.destroy();
+
+    // Luciérnaga nocturna: núcleo cálido con aura verdosa (12x12).
+    g = this.make.graphics({ x: 0, y: 0 }, false);
+    g.fillStyle(0xd8ffa0, 0.3);
+    g.fillCircle(6, 6, 5.5);
+    g.fillStyle(0xfff6c8, 0.95);
+    g.fillCircle(6, 6, 2.2);
+    g.generateTexture('firefly', 12, 12);
+    g.destroy();
   }
 }

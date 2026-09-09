@@ -2,6 +2,15 @@
 
 Todos los cambios documentados por checkpoint (tags `v*`).
 
+## [sin tag] — Salto visual (3 subagentes + integración)
+- Terreno con relieve pictórico y agua con destellos/espuma
+  (`fx/water.ts`); luz con faroles, luciérnagas y viñeta
+  (`fx/atmosphere.ts`); UI moderna por categorías
+  (`HudPanels/BuildMenu`, ver `docs/devlog/025…028-*`).
+- Integración: paneado manual (los `cam.pan()` fallaban), `updateSky`.
+- Verificación: 77/77 unit, tsc limpio, build OK, e2e 2/2, capturas
+  día/noche/costa/pueblo revisadas.
+
 ## [sin tag] — Fase 4: colonia rival con las mismas reglas
 - IA que construye por orden, produce, recluta e incursiona con los mismos
   costes/recetas; guarnición, asedio del jugador y victoria al arrasar su
