@@ -2,13 +2,15 @@
 // lecho marino + vegetación instanciada + agua + sol. Todo procedural.
 
 import * as THREE from 'three';
-import { ISLAND_SIZE } from '@/game/maps/island';
+import { ISLAND_SIZE, terrainAt } from '@/game/maps/island';
 import { HEIGHT_SCALE, TILE, slopeAt, smoothHeightAt, tileToWorld } from './height';
 import { biomeAt, surfaceColor } from './biome';
 import { scatterVegetation, type ScatterItem } from './vegetation';
 import { buildHome3D, lampMaterial } from './buildings3d';
-import type { Owner } from '@/game/systems/rival';
+import { createBoat, createBunny, createDeer, createSettler, createSheep, poseWalker, WALKER_ROLES, type WalkerRig } from './actors';
+import { findPath, type GridPos } from '@/game/systems/pathfinding';
 import type { BuildingId } from '@/game/data/buildings';
+import type { Owner } from '@/game/systems/rival';
 
 export interface SpikeHandle {
   dispose: () => void;
@@ -209,6 +211,7 @@ export function createSpikeScene(container: HTMLElement): SpikeHandle {
   scene.add(new THREE.HemisphereLight(0xbcd7f0, 0x3d5a34, 0.9));
 
   // Colonia inicial (misma planta que el juego 2D).
+  const spinners: THREE.Object3D[] = [];
   const town: [BuildingId, number, number, Owner, number][] = [
     ['almacen', 14, 14, 'player', 0],
     ['cabanaLenador', 11, 13, 'player', 0.5],
@@ -229,6 +232,7 @@ export function createSpikeScene(container: HTMLElement): SpikeHandle {
     g.position.set(p.x, p.y - 0.05, p.z);
     g.rotation.y = rot;
     scene.add(g);
+    if (g.userData.sails) spinners.push(...g.userData.sails);
   }
 
   // Controles propios: arrastrar = pan, rueda = zoom.
@@ -274,9 +278,137 @@ export function createSpikeScene(container: HTMLElement): SpikeHandle {
 
   let raf = 0;
   let dead = false;
+
+  // --- Población del spike: 18 colonos con A* real + fauna + barco ---
+  const landBlocked = (gx: number, gy: number) => (x: number, y: number) => {
+    if (x < 1 || y < 1 || x >= ISLAND_SIZE - 1 || y >= ISLAND_SIZE - 1) return true;
+    if (x === gx && y === gy) return false;
+    const t = terrainAt(x, y);
+    return t === 'water' || t === 'waterB' || t === 'waterC' || t === 'mountain';
+  };
+  const randomLand = (): GridPos => {
+    for (let i = 0; i < 40; i++) {
+      const x = 2 + Math.floor(Math.random() * (ISLAND_SIZE - 4));
+      const y = 2 + Math.floor(Math.random() * (ISLAND_SIZE - 4));
+      const t = terrainAt(x, y);
+      if (t !== 'water' && t !== 'waterB' && t !== 'waterC' && t !== 'mountain') return { x, y };
+    }
+    return { x: 14, y: 14 };
+  };
+  interface Agent { g: WalkerRig; path: GridPos[]; wp: { x: number; y: number; z: number } | null; wait: number; speed: number }
+  const agents: Agent[] = [];
+  const roles = [...WALKER_ROLES];
+  for (let i = 0; i < 18; i++) {
+    const role = roles[i % roles.length];
+    const loaded = role === 'carrier' || (role === 'woodcutter' && i % 2 === 0);
+    const g = createSettler(role, loaded);
+    const from = randomLand();
+    const p = tileToWorld(from.x, from.y);
+    g.position.set(p.x, p.y, p.z);
+    scene.add(g);
+    agents.push({ g, path: [], wp: null, wait: Math.random() * 2, speed: 2.0 + Math.random() * 0.6 });
+  }
+  const assignAgent = (a: Agent) => {
+    const cur = a.g.position;
+    const from = { x: Math.round(cur.x / TILE + ISLAND_SIZE / 2), y: Math.round(cur.z / TILE + ISLAND_SIZE / 2) };
+    const dest = randomLand();
+    const raw = findPath(from, dest, ISLAND_SIZE, ISLAND_SIZE, landBlocked(dest.x, dest.y));
+    a.path = raw ? raw.slice(1) : [];
+    const next = a.path.shift();
+    a.wp = next ? (() => { const p = tileToWorld(next.x, next.y); return p; })() : null;
+    if (!a.wp) a.wait = 1 + Math.random() * 2;
+  };
+  // Fauna ambiente.
+  const critters: { g: THREE.Group; path: GridPos[]; wp: WorldPos | null; wait: number }[] = [];
+  const critterKinds = [createSheep, createSheep, createSheep, createBunny, createBunny, createDeer];
+  for (const make of critterKinds) {
+    const g = make();
+    const from = randomLand();
+    const p = tileToWorld(from.x, from.y);
+    g.position.set(p.x, p.y, p.z);
+    scene.add(g);
+    critters.push({ g, path: [], wp: null, wait: Math.random() * 3 });
+  }
+  // Barco en circuito alrededor de la isla.
+  const boat = createBoat();
+  scene.add(boat);
+  let boatA = Math.random() * Math.PI * 2;
+
+  type WorldPos = { x: number; y: number; z: number };
+  const stepAgent = (a: Agent, dt: number) => {
+    if (!a.wp) {
+      poseWalker(a.g, dt, false);
+      a.wait -= dt;
+      if (a.wait <= 0) assignAgent(a);
+      return;
+    }
+    const dx = a.wp.x - a.g.position.x;
+    const dz = a.wp.z - a.g.position.z;
+    const dist = Math.hypot(dx, dz);
+    const step = a.speed * dt;
+    if (dist <= Math.max(0.1, step)) {
+      a.g.position.x = a.wp.x;
+      a.g.position.z = a.wp.z;
+      const next = a.path.shift();
+      a.wp = next ? tileToWorld(next.x, next.y) : null;
+      if (!a.wp) a.wait = 1 + Math.random() * 3;
+    } else {
+      a.g.position.x += (dx / dist) * step;
+      a.g.position.z += (dz / dist) * step;
+      a.g.rotation.y = Math.atan2(dx, dz);
+      poseWalker(a.g, dt, true);
+    }
+    a.g.position.y = smoothHeightAt(
+      a.g.position.x / TILE + ISLAND_SIZE / 2,
+      a.g.position.z / TILE + ISLAND_SIZE / 2,
+    ) * HEIGHT_SCALE;
+  };
+
+  const clock = new THREE.Clock();
   const loop = () => {
     if (dead) return;
     raf = requestAnimationFrame(loop);
+    const dt = Math.min(clock.getDelta(), 0.1);
+    for (const a of agents) stepAgent(a, dt);
+    for (const c of critters) {
+      if (!c.wp) {
+        c.wait -= dt;
+        if (c.wait <= 0) {
+          const cur = { x: Math.round(c.g.position.x / TILE + ISLAND_SIZE / 2), y: Math.round(c.g.position.z / TILE + ISLAND_SIZE / 2) };
+          const dest = {
+            x: Math.max(2, Math.min(ISLAND_SIZE - 3, cur.x + Math.floor(Math.random() * 9) - 4)),
+            y: Math.max(2, Math.min(ISLAND_SIZE - 3, cur.y + Math.floor(Math.random() * 9) - 4)),
+          };
+          const raw = findPath(cur, dest, ISLAND_SIZE, ISLAND_SIZE, landBlocked(dest.x, dest.y));
+          c.path = raw ? raw.slice(1) : [];
+          const next = c.path.shift();
+          c.wp = next ? tileToWorld(next.x, next.y) : null;
+          if (!c.wp) c.wait = 1 + Math.random() * 3;
+        }
+        continue;
+      }
+      const dx = c.wp.x - c.g.position.x;
+      const dz = c.wp.z - c.g.position.z;
+      const dist = Math.hypot(dx, dz);
+      const step = 1.1 * dt;
+      if (dist <= Math.max(0.1, step)) {
+        const next = c.path.shift();
+        c.wp = next ? tileToWorld(next.x, next.y) : null;
+        if (!c.wp) c.wait = 2 + Math.random() * 4;
+      } else {
+        c.g.position.x += (dx / dist) * step;
+        c.g.position.z += (dz / dist) * step;
+        c.g.rotation.y = Math.atan2(dx, dz);
+      }
+      c.g.position.y = smoothHeightAt(
+        c.g.position.x / TILE + ISLAND_SIZE / 2,
+        c.g.position.z / TILE + ISLAND_SIZE / 2,
+      ) * HEIGHT_SCALE;
+    }
+    boatA += dt * 0.05;
+    boat.position.set(Math.cos(boatA) * 30, 0.35 + Math.sin(clock.elapsedTime * 1.4) * 0.08, Math.sin(boatA) * 30);
+    boat.rotation.y = -boatA;
+    for (const s of spinners) s.rotation.z += dt * 0.7;
     renderer.render(scene, camera);
   };
   loop();
