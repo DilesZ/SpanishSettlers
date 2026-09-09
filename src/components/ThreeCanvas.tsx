@@ -8,7 +8,7 @@ export default function ThreeCanvas() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let handle: { dispose: () => void } | null = null;
+    let handle: { dispose: () => void; setNight?: (on: boolean) => void } | null = null;
     let disposed = false;
 
     (async () => {
@@ -17,6 +17,11 @@ export default function ThreeCanvas() {
         if (disposed || !hostRef.current) return;
         hostRef.current.innerHTML = '';
         handle = createSpikeScene(hostRef.current);
+        try {
+          if (new URLSearchParams(window.location.search).get('noche') === '1') {
+            handle.setNight?.(true);
+          }
+        } catch { /* sin query: día */ }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'No se pudo iniciar Three.js');
       }

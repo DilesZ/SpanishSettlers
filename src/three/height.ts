@@ -31,3 +31,24 @@ export function tileToWorld(tx: number, ty: number): WorldPos {
     z: (ty - ISLAND_SIZE / 2) * TILE,
   };
 }
+
+/** Altura suavizada (bilinear de las 4 esquinas enteras) para la malla. */
+export function smoothHeightAt(x: number, y: number): number {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const fx = x - x0;
+  const fy = y - y0;
+  const h00 = heightAt(x0, y0);
+  const h10 = heightAt(x0 + 1, y0);
+  const h01 = heightAt(x0, y0 + 1);
+  const h11 = heightAt(x0 + 1, y0 + 1);
+  return h00 * (1 - fx) * (1 - fy) + h10 * fx * (1 - fy) + h01 * (1 - fx) * fy + h11 * fx * fy;
+}
+
+/** Pendiente (magnitud del gradiente) para teñir roca en cantiles. */
+export function slopeAt(x: number, y: number): number {
+  const e = 0.35;
+  const dx = (smoothHeightAt(x + e, y) - smoothHeightAt(x - e, y)) / (2 * e);
+  const dy = (smoothHeightAt(x, y + e) - smoothHeightAt(x, y - e)) / (2 * e);
+  return Math.hypot(dx, dy);
+}
