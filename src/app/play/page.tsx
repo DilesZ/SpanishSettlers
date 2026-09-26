@@ -6,7 +6,7 @@ import { playSfx, unlockAudio } from '@/game/audio';
 import { isMusicEnabled, setMusicEnabled, startMusic } from '@/game/music';
 import type { BuildingId } from '@/game/data/buildings';
 import { BuildMenu } from '@/components/BuildMenu';
-import { ColonyPanel, EndingOverlay, InspectCard, ResourceBar, SiegeBar, SpeedControl, TopBar, type SiegeInfo, type TransportInfo } from '@/components/HudPanels';
+import { ColonyPanel, EndingOverlay, InspectCard, QuestTracker, ResourceBar, SiegeBar, SpeedControl, TopBar, type QuestInfo, type SiegeInfo, type TransportInfo } from '@/components/HudPanels';
 
 // Dynamic import: el canvas pesado solo en cliente (skill bundle-dynamic-imports).
 const GameCanvas = dynamic(() => import('@/components/GameCanvas'), { ssr: false });
@@ -53,6 +53,7 @@ export default function PlayPage() {
   const [transport, setTransport] = useState<TransportInfo | null>(null);
   const [explored, setExplored] = useState<number | null>(null);
   const [siege, setSiege] = useState<SiegeInfo | null>(null);
+  const [quest, setQuest] = useState<QuestInfo | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -67,6 +68,7 @@ export default function PlayPage() {
           transport: () => TransportInfo;
           map: () => { explored: number };
           siege: () => SiegeInfo;
+          quest: () => QuestInfo & { target: BuildingId | null };
           speed: () => number;
           setSpeed: (s: number) => void;
         };
@@ -94,6 +96,8 @@ export default function PlayPage() {
           if (mp && typeof mp.explored === 'number') setExplored(mp.explored);
           const sg = w.__game?.siege();
           if (sg && typeof sg.nextWaveIn === 'number') setSiege(sg);
+          const qu = w.__game?.quest();
+          if (qu && typeof qu.step === 'number') setQuest(qu);
           const sp = w.__game?.speed();
           if (typeof sp === 'number') setSpeed(sp);
         } catch { /* transporte aún no listo */ }
@@ -186,6 +190,7 @@ export default function PlayPage() {
       <div className="relative mx-auto w-full max-w-[1440px] px-3 pb-8 md:px-5">
         <ResourceBar stock={stock} />
         <SpeedControl speed={speed} transport={transport} explored={explored} onSpeed={changeSpeed} />
+        <QuestTracker quest={quest} />
         <SiegeBar siege={siege} />
 
         <div className="mt-3 grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -244,6 +249,7 @@ export default function PlayPage() {
           roadMode={roadMode}
           rival={rival}
           stock={stock}
+          questTarget={quest && !quest.complete ? (quest as QuestInfo & { target: BuildingId | null }).target : null}
           onBuild={build}
           onRoad={startRoad}
         />

@@ -20,6 +20,7 @@ import { initWeather, stopWeather, registerWeatherCloud, type Weather } from '..
 import { dustBurst, builtBurst, chopBurst, hitFlash, recruitRing, harvestSparkle, smokeColumn, splashPuff, stepPuff } from '../fx/vfx';
 import { hasLivingWood, nearestLivingWood, terrainSpeed, type NatureNode } from '../systems/terrain';
 import { createFog, deserializeFog, EXPLORED, exploredPercent, fogAt, HIDDEN, isExplored, revealCircle, serializeFog, settleFog, VISIBLE, type FogGrid } from '../systems/fog';
+import { questState } from '../systems/quest';
 import { computeEdges, placeEdges } from '../fx/edges';
 
 // Rama B: arte GPL de Widelands (ver docs/ATRIBUCION.md + wlArt.ts).
@@ -3072,6 +3073,7 @@ export class GameScene extends Phaser.Scene {
         transport: () => { waiting: number; inTransit: number; congested: number };
         map: () => { explored: number };
         siege: () => { nextWaveIn: number; wave: number; wavesToWin: number; repelled: number };
+        quest: () => { step: number; complete: boolean; target: BuildingId | null; steps: { id: string; text: string; done: boolean }[] };
         speed: () => number;
         setSpeed: (s: number) => void;
         stock: () => Stock;
@@ -3144,6 +3146,14 @@ export class GameScene extends Phaser.Scene {
         wavesToWin: VICTORY_WAVES,
         repelled: this.wavesRepelled,
       }),
+      quest: () => {
+        const q = questState(
+          this.placed.filter((p) => p.owner === 'player').map((p) => p.id),
+          this.stock.tablon ?? 0,
+          this.wavesRepelled,
+        );
+        return { step: q.step, complete: q.complete, target: q.target, steps: q.steps.map((s) => ({ id: s.id, text: s.text, done: s.done })) };
+      },
       speed: () => this.gameSpeed,
       setSpeed: (s: number) => {
         this.gameSpeed = s === 4 ? 4 : s === 2 ? 2 : 1;

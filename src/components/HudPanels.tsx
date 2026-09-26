@@ -167,6 +167,61 @@ export function SpeedControl({
   );
 }
 
+export interface QuestStepInfo {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
+export interface QuestInfo {
+  step: number;
+  complete: boolean;
+  steps: QuestStepInfo[];
+}
+
+/** Tracker fijo de la quest (R1): 3 pasos, se colapsa a ✓ al completar. */
+export function QuestTracker({ quest }: { quest: QuestInfo | null }) {
+  if (!quest) return null;
+  if (quest.complete) {
+    return (
+      <div
+        role="status"
+        aria-label="Tutorial completado"
+        className="mt-3 flex items-center gap-2 rounded-2xl border border-emerald-400/30 bg-[#101a12]/95 px-3 py-2 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]"
+      >
+        <span aria-hidden className="text-emerald-300">✓</span>
+        <span className="text-xs font-bold text-emerald-100">Primeros pasos listos: la colonia es tuya</span>
+      </div>
+    );
+  }
+  return (
+    <div
+      role="status"
+      aria-label="Tutorial"
+      className="mt-3 rounded-2xl border border-amber-200/15 bg-[#101a12]/95 px-3 py-2 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]"
+    >
+      <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-200/90">
+        🧭 Primeros pasos ({quest.step + 1}/3)
+      </div>
+      <ul className="mt-1.5 space-y-1">
+        {quest.steps.map((s, i) => (
+          <li
+            key={s.id}
+            className={`flex items-center gap-2 text-xs ${
+              s.done ? 'text-emerald-100/80 line-through' : i === quest.step ? 'font-bold text-amber-50' : 'text-amber-100/50'
+            }`}
+          >
+            <span aria-hidden className={s.done ? 'text-emerald-300' : i === quest.step ? 'text-amber-300' : 'text-amber-100/40'}>
+              {s.done ? '✓' : i === quest.step ? '▶' : '○'}
+            </span>
+            {s.text}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export interface SiegeInfo {
   nextWaveIn: number;
   wave: number;

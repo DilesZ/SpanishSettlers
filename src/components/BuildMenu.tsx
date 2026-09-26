@@ -19,11 +19,13 @@ interface BuildMenuProps {
   roadMode: boolean;
   rival: number | null;
   stock: Record<string, number> | null;
+  /** Edificio del paso actual de la quest (pulso guía, R1). */
+  questTarget?: BuildingId | null;
   onBuild: (id: BuildingId) => void;
   onRoad: () => void;
 }
 
-export function BuildMenu({ selected, roadMode, rival, stock, onBuild, onRoad }: BuildMenuProps) {
+export function BuildMenu({ selected, roadMode, rival, stock, questTarget, onBuild, onRoad }: BuildMenuProps) {
   const [tab, setTab] = useState<CategoryId>('todos');
 
   const countFor = (c: CategoryId) =>
@@ -105,6 +107,7 @@ export function BuildMenu({ selected, roadMode, rival, stock, onBuild, onRoad }:
           const affordable =
             !stock || costs.every(([k, v]) => (stock[k] ?? 0) >= v);
           const active = selected === id;
+          const guided = questTarget === id && !active;
           return (
             <button
               key={id}
@@ -114,7 +117,9 @@ export function BuildMenu({ selected, roadMode, rival, stock, onBuild, onRoad }:
               className={`group flex items-start gap-2.5 rounded-xl border p-2.5 text-left transition ${
                 active
                   ? 'border-amber-300/80 bg-amber-300/[0.13] shadow-[0_0_20px_-6px_rgba(251,191,36,0.7)]'
-                  : 'border-white/[0.08] bg-white/[0.04] hover:border-amber-200/40 hover:bg-white/[0.07]'
+                  : guided
+                    ? 'animate-pulse border-amber-300/70 bg-amber-300/[0.08]'
+                    : 'border-white/[0.08] bg-white/[0.04] hover:border-amber-200/40 hover:bg-white/[0.07]'
               } ${affordable ? '' : 'opacity-85'}`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
