@@ -4,6 +4,7 @@ import {
   VFX_MAX,
   builtBurst,
   dustBurst,
+  floatText,
   harvestSparkle,
   hitFlash,
   recruitRing,
@@ -23,6 +24,7 @@ function makeObj(x = 0, y = 0): any {
     cleared: 0,
     scene: null as any,
     setDepth() { return o; },
+    setOrigin() { return o; },
     setScale() { return o; },
     setAlpha(a: number) { o.alpha = a; return o; },
     setRotation() { return o; },
@@ -60,6 +62,11 @@ function makeScene() {
       ellipse: (x: number, y: number) => mk(x, y),
       image: (x: number, y: number) => mk(x, y),
       rectangle: (x: number, y: number) => mk(x, y),
+      text: (x: number, y: number, content: string) => {
+        const o = mk(x, y);
+        o.content = content;
+        return o;
+      },
     },
   };
   return { scene: scene as Phaser.Scene, created, tweenCfgs, delayed };
@@ -128,6 +135,19 @@ describe('vfx: presupuesto y limpieza', () => {
     }).not.toThrow();
     settle(tweenCfgs, delayed);
     expect(created.every((c: any) => c.destroyed)).toBe(true);
+  });
+});
+
+describe('vfx: floatText (juice R1)', () => {
+  it('crea un texto que sube y se autodestruye', () => {
+    const { scene, created, tweenCfgs, delayed } = makeScene();
+    floatText(scene, 10, 20, '+2🪵');
+    expect(created.length).toBe(1);
+    expect(created[0].content).toBe('+2🪵');
+    expect(tweenCfgs.length).toBe(1);
+    expect(Number.isFinite(tweenCfgs[0].duration)).toBe(true);
+    settle(tweenCfgs, delayed);
+    expect(created[0].destroyed).toBe(true);
   });
 });
 

@@ -348,6 +348,40 @@ export function stepPuff(scene: Phaser.Scene, x: number, y: number, color = 0xcb
 }
 
 /**
+ * Número flotante de juice (UN objeto texto, 0.8 s): "+2🪵" al entregar,
+ * al terminar una obra, al cosechar. R1: feedback inmediato por acción.
+ */
+export function floatText(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  text: string,
+  color = '#fde68a',
+): void {
+  try {
+    const t = scene.add.text(x, y, text, { fontSize: '15px', color });
+    t.setOrigin(0.5);
+    t.setDepth(VFX_DEPTHS.sparkle);
+    ignoreOnMinimap(scene, [t]);
+    scene.tweens.add({
+      targets: t,
+      y: y - 34,
+      alpha: 0,
+      duration: 800,
+      onComplete: () => {
+        try {
+          t.destroy();
+        } catch {
+          /* ya destruido por la escena */
+        }
+      },
+    });
+  } catch {
+    /* noop */
+  }
+}
+
+/**
  * Columna de humo de 3 bocanadas (one-shot, ~1.1 s de vida).
  * Enganche: combatTick cuando un edificio baja del 35% de vida y
  * destroyBuilding (junto a dustBurst). No es un emisor continuo: llamar

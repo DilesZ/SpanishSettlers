@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { playSfx } from '../audio';
+import { playBlip, playSfx } from '../audio';
 import { BUILDINGS, INITIAL_STOCK, RECIPES, type BuildingId, type ResourceId } from '../data/buildings';
 import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_GRASS, WL_RES_ICONS, WL_ROCKS, WL_SHIPS, WL_SHROOMS, WL_TREES, WL_WHEAT, WL_WHEAT_ORDER, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
 import { DAY_LENGTH_MS, skyAt } from '../systems/daynight';
@@ -17,7 +17,7 @@ import { initWaterFX, updateWaterFX, LEGACY_WATER_BLINK_ENABLED, type WaterFX } 
 import { initAtmosphere, updateSky, registerCloud } from '../fx/atmosphere';
 import { initCameraGrade, setNightGrade, attachBuildingShadow, selectGlow, discardSelectGlow, glowGhost } from '../fx/postfx';
 import { initWeather, stopWeather, registerWeatherCloud, type Weather } from '../fx/weather';
-import { dustBurst, builtBurst, chopBurst, hitFlash, recruitRing, harvestSparkle, smokeColumn, splashPuff, stepPuff } from '../fx/vfx';
+import { dustBurst, builtBurst, chopBurst, floatText, hitFlash, recruitRing, harvestSparkle, smokeColumn, splashPuff, stepPuff } from '../fx/vfx';
 import { hasLivingWood, nearestLivingWood, terrainSpeed, type NatureNode } from '../systems/terrain';
 import { createFog, deserializeFog, EXPLORED, exploredPercent, fogAt, HIDDEN, isExplored, revealCircle, serializeFog, settleFog, VISIBLE, type FogGrid } from '../systems/fog';
 import { questState } from '../systems/quest';
@@ -2136,6 +2136,9 @@ export class GameScene extends Phaser.Scene {
           this.setGoods(w, job.resource);
           this.sendWalker(w, almacen.tx, almacen.ty, () => {
             this.stock[job.resource] = (this.stock[job.resource] ?? 0) + got;
+            const ap = this.iso(almacen.tx, almacen.ty);
+            floatText(this, ap.x + 20, ap.y - 60, `+${got}`);
+            playBlip('pop');
             this.updateHud();
             w.loaded = false;
             this.setGoods(w, null);
@@ -2432,6 +2435,8 @@ export class GameScene extends Phaser.Scene {
         this.buildBars.delete(bkey);
         stepPuff(this, x + 8, y - 4);
         playSfx('built');
+        playBlip('coin');
+        floatText(this, x, y - 70, '✓');
         builtBurst(this, x, y);
         if (id === 'puerto') this.spawnShip(tx, ty);
       },
@@ -2778,6 +2783,7 @@ export class GameScene extends Phaser.Scene {
         this.rivalSpotted = true;
         this.hintText?.setText('⚔ ¡Exploradores avistan otra colonia al otro lado!').setY(44);
         playSfx('sword');
+        playBlip('horn');
         this.time.delayedCall(5000, () => this.hintText.setText(''));
       }
     }

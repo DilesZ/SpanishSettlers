@@ -25,6 +25,55 @@ export function unlockAudio() {
   }
 }
 
+let actx: AudioContext | null = null;
+
+/**
+ * Blips procedurales WebAudio (R1, sin assets): pop al entregar, coin al
+ * completar quest/obra, horn grave al avistar rival u oleada. El audio nunca
+ * debe romper el juego: todo envuelto en try/catch y no-op sin gesto.
+ */
+export function playBlip(kind: 'pop' | 'coin' | 'horn') {
+  try {
+    if (typeof window === 'undefined') return;
+    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AC) return;
+    actx ??= new AC();
+    if (actx.state === 'suspended') void actx.resume().catch(() => undefined);
+    const t0 = actx.currentTime;
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    if (kind === 'pop') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(520, t0);
+      osc.frequency.exponentialRampToValueAtTime(880, t0 + 0.08);
+      gain.gain.setValueAtTime(0.18, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.12);
+      osc.start(t0);
+      osc.stop(t0 + 0.13);
+    } else if (kind === 'coin') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(880, t0);
+      osc.frequency.setValueAtTime(1320, t0 + 0.09);
+      gain.gain.setValueAtTime(0.16, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22);
+      osc.start(t0);
+      osc.stop(t0 + 0.23);
+    } else {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(147, t0);
+      osc.frequency.linearRampToValueAtTime(110, t0 + 0.35);
+      gain.gain.setValueAtTime(0.14, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.4);
+      osc.start(t0);
+      osc.stop(t0 + 0.42);
+    }
+  } catch {
+    // audio nunca debe romper el juego
+  }
+}
+
 export function playSfx(name: keyof typeof FILES) {
   try {
     if (typeof window === 'undefined') return;
