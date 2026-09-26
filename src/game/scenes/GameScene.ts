@@ -116,8 +116,10 @@ export class GameScene extends Phaser.Scene {
   pendingRoad = false;
   roads: RoadNet = createRoadNet();
   private roadDecals = new Map<string, Phaser.GameObjects.Container>();
-  /** Avisos de producción bloqueada por edificio ("x,y" → recursos que faltan). */
-  private stallInfo = new Map<string, ResourceId[]>();
+  /** Avisos de producción bloqueada por edificio ("x,y" → qué falta). */
+  private stallInfo = new Map<string, string[]>();
+  /** Reserva de veta por mina ("x,y" → unidades). Nueva mina = 30 (R1). */
+  private mineReserves: Record<string, number> = {};
   private stallMarks = new Map<string, Phaser.GameObjects.Text>();
   // ---------- Transporte causal (council Fase 1: banderas + colas + ETA) ----------
   // Los productores vierten a buffers locales; la cola mueve al almacén con
@@ -1745,7 +1747,7 @@ export class GameScene extends Phaser.Scene {
     try {
       const scouts = this.walkers.filter((w) => w.task === 'scout' && w.sprite.active).length;
       const data = {
-        v: 6,
+        v: 7,
         savedAt: Date.now(),
         stock: this.stock,
         aiStock: this.aiStock,
@@ -1761,6 +1763,7 @@ export class GameScene extends Phaser.Scene {
         fog: serializeFog(this.fog),
         scouts,
         rivalSpotted: this.rivalSpotted,
+        mineReserves: { ...this.mineReserves },
       };
       window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
       if (!silent) playSfx('confirm');
@@ -1785,6 +1788,7 @@ export class GameScene extends Phaser.Scene {
         fog?: unknown;
         scouts?: number;
         rivalSpotted?: boolean;
+        mineReserves?: unknown;
       };
       if (!data || !Array.isArray(data.placed)) return false;
       // limpiar mundo
@@ -1840,6 +1844,16 @@ export class GameScene extends Phaser.Scene {
       this.rivalSpotted = data.rivalSpotted === true;
       if (exploredPercent(this.fog) === 0) {
         revealCircle(this.fog, MAP, this.center.x, this.center.y, 8);
+      }
+      // Reservas v7 (v6 o ausente = vetas llenas al producir).
+      this.mineReserves = {};
+      const savedReserves = (data as { mineReserves?: unknown }).mineReserves;
+      if (savedReserves && typeof savedReserves === 'object') {
+        for (const [k, v] of Object.entries(savedReserves as Record<string, unknown>)) {
+          if (/^-?\d+,-?\d+$/.test(k) && typeof v === 'number' && v >= 0) {
+            this.mineReserves[k] = Math.floor(v);
+          }
+        }
       }
       if (data.gameSpeed === 2 || data.gameSpeed === 4) this.gameSpeed = data.gameSpeed;
       else this.gameSpeed = 1;
@@ -1928,6 +1942,7 @@ export class GameScene extends Phaser.Scene {
     this.pileIcons.delete(`${tx},${ty}`);
     this.buildBars.get(`${tx},${ty}`)?.destroy();
     this.buildBars.delete(`${tx},${ty}`);
+    delete this.mineReserves[`${tx},${ty}`];
     delete this.transport.buffers[`${tx},${ty}`];
     this.transport.queue = this.transport.queue.filter((l) => l.fromKey !== `${tx},${ty}`);
     bumpPathCache();
@@ -2417,6 +2432,9 @@ export class GameScene extends Phaser.Scene {
     });
     this.placed.push({ id, tx, ty, sprite: c, done: 0, total: def.tiempoConstruccionMs, owner });
     this.buildingTiles.add(`${tx},${ty}`);
+    if (id === 'minaCarbon' || id === 'minaHierro' || id === 'minaOro') {
+      this.mineReserves[`${tx},${ty}`] = 30;
+    }
     bumpPathCache();
     if (WL_SMOKE.has(id)) this.addSmoke(x, y - art.h * scale * 0.85, depth + 1);
     else if (WL_SMOKE_SOFT.has(id)) this.addSmoke(x, y - art.h * scale * 0.85, depth + 1, 1700, 0.7);
@@ -2548,14 +2566,33 @@ export class GameScene extends Phaser.Scene {
     const playerPlaced = this.placed.filter((p) => p.owner !== 'rival');
     // Interacción terreno: cada cabaña necesita bosque vivo en radio 6;
     // sin árboles no hay madera (el leñador la tala de verdad, ver chop).
+    const isMineId = (id: BuildingId) => id === 'minaCarbon' || id === 'minaHierro' || id === 'minaOro';
     const placements = playerPlaced
       .filter((p) => {
         if (p.id !== 'cabanaLenador') return true;
         return hasLivingWood(this.treeNodes, p.tx, p.ty, 6);
       })
-      .map((p) => ({ id: p.id, key: `${p.tx},${p.ty}` }));
+      .map((p) => {
+        const key = `${p.tx},${p.ty}`;
+        return { id: p.id, key, reserve: isMineId(p.id) ? (this.mineReserves[key] ?? 30) : undefined };
+      });
     const prod = produceToBuffers(this.transport.buffers, placements, this.stock, this.econTickNo);
     this.stock = prod.central;
+    // R1: descontar veta consumida y marcar minas agotadas (⛏).
+    for (const [key, n] of Object.entries(prod.consumed)) {
+      this.mineReserves[key] = Math.max(0, (this.mineReserves[key] ?? 30) - n);
+    }
+    for (const key of prod.depletedKeys) {
+      this.stallInfo.set(key, ['⛏ veta agotada']);
+      if (!this.stallMarks.has(key)) {
+        const [tx, ty] = key.split(',').map(Number);
+        const { x, y } = this.iso(tx, ty);
+        const mark = this.add.text(x + 34, y - 92, '⚠', { fontSize: '22px' })
+          .setOrigin(0.5).setDepth(9600);
+        this.tweens.add({ targets: mark, y: y - 100, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        this.stallMarks.set(key, mark);
+      }
+    }
     const almacen = playerPlaced.find((p) => p.id === 'almacen');
     const cx = almacen?.tx ?? this.center.x;
     const cy = almacen?.ty ?? this.center.y;
