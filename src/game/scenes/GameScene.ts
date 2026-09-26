@@ -435,6 +435,7 @@ export class GameScene extends Phaser.Scene {
     this.time.addEvent({ delay: 500, loop: true, callback: () => this.combatTick() });
     this.time.addEvent({ delay: 60000, loop: true, callback: () => this.saveGame(true) });
     this.startTime = this.time.now;
+    this.nextWaveAt = this.time.now + 75000;
     this.time.delayedCall(75000, () => this.spawnWave());
     this.time.addEvent({ delay: 100000, loop: true, callback: () => this.spawnWave() });
     this.scale.on('resize', () => this.layoutMinimap());
@@ -1478,9 +1479,13 @@ export class GameScene extends Phaser.Scene {
     return best;
   }
 
+  /** Cuándo llega la próxima oleada (ms de escena; R1: deadline visible). */
+  private nextWaveAt = 0;
+
   private spawnWave() {
     if (this.gameStatus !== 'playing') return;
     this.waveNo++;
+    this.nextWaveAt = this.time.now + 100000;
     const spec = waveSpec(this.waveNo);
     // borde del mapa: loseta de tierra aleatoria en el perímetro
     const edge: GridPos[] = [];
@@ -3066,6 +3071,7 @@ export class GameScene extends Phaser.Scene {
         stalls: () => { id: BuildingId; nombre: string; tx: number; ty: number; faltan: string[] }[];
         transport: () => { waiting: number; inTransit: number; congested: number };
         map: () => { explored: number };
+        siege: () => { nextWaveIn: number; wave: number; wavesToWin: number; repelled: number };
         speed: () => number;
         setSpeed: (s: number) => void;
         stock: () => Stock;
@@ -3132,6 +3138,12 @@ export class GameScene extends Phaser.Scene {
         congested: congestedKeys(this.transport, 6).length,
       }),
       map: () => ({ explored: exploredPercent(this.fog) }),
+      siege: () => ({
+        nextWaveIn: Math.max(0, Math.round((this.nextWaveAt - this.time.now) / 1000)),
+        wave: this.waveNo,
+        wavesToWin: VICTORY_WAVES,
+        repelled: this.wavesRepelled,
+      }),
       speed: () => this.gameSpeed,
       setSpeed: (s: number) => {
         this.gameSpeed = s === 4 ? 4 : s === 2 ? 2 : 1;

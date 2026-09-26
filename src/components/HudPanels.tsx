@@ -167,6 +167,37 @@ export function SpeedControl({
   );
 }
 
+export interface SiegeInfo {
+  nextWaveIn: number;
+  wave: number;
+  wavesToWin: number;
+  repelled: number;
+}
+
+/** Reloj de asedio: deadline visible (R1). Oleada actual, cuenta atrás y progreso. */
+export function SiegeBar({ siege }: { siege: SiegeInfo | null }) {
+  if (!siege) return null;
+  const mm = Math.floor(siege.nextWaveIn / 60);
+  const ss = String(siege.nextWaveIn % 60).padStart(2, '0');
+  return (
+    <div
+      role="timer"
+      aria-label="Próxima oleada"
+      className="mt-3 flex items-center gap-2 rounded-2xl border border-red-400/25 bg-[#101a12]/95 px-3 py-2 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]"
+    >
+      <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-red-200/90">
+        ⚔ Asedio
+      </span>
+      <span className="text-xs font-black text-amber-50 tabular-nums">
+        {mm}:{ss}
+      </span>
+      <span className="ml-auto text-[11px] text-amber-100/70 tabular-nums">
+        Oleada {siege.wave}/{siege.wavesToWin} · repelidas {siege.repelled}
+      </span>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------- ColonyPanel ---
 
 export interface Objective {

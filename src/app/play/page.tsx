@@ -6,7 +6,7 @@ import { playSfx, unlockAudio } from '@/game/audio';
 import { isMusicEnabled, setMusicEnabled, startMusic } from '@/game/music';
 import type { BuildingId } from '@/game/data/buildings';
 import { BuildMenu } from '@/components/BuildMenu';
-import { ColonyPanel, EndingOverlay, InspectCard, ResourceBar, SpeedControl, TopBar, type TransportInfo } from '@/components/HudPanels';
+import { ColonyPanel, EndingOverlay, InspectCard, ResourceBar, SiegeBar, SpeedControl, TopBar, type SiegeInfo, type TransportInfo } from '@/components/HudPanels';
 
 // Dynamic import: el canvas pesado solo en cliente (skill bundle-dynamic-imports).
 const GameCanvas = dynamic(() => import('@/components/GameCanvas'), { ssr: false });
@@ -52,6 +52,7 @@ export default function PlayPage() {
   const [speed, setSpeed] = useState(1);
   const [transport, setTransport] = useState<TransportInfo | null>(null);
   const [explored, setExplored] = useState<number | null>(null);
+  const [siege, setSiege] = useState<SiegeInfo | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -65,6 +66,7 @@ export default function PlayPage() {
           pop: () => Pop;
           transport: () => TransportInfo;
           map: () => { explored: number };
+          siege: () => SiegeInfo;
           speed: () => number;
           setSpeed: (s: number) => void;
         };
@@ -90,6 +92,8 @@ export default function PlayPage() {
           if (tr) setTransport(tr);
           const mp = w.__game?.map();
           if (mp && typeof mp.explored === 'number') setExplored(mp.explored);
+          const sg = w.__game?.siege();
+          if (sg && typeof sg.nextWaveIn === 'number') setSiege(sg);
           const sp = w.__game?.speed();
           if (typeof sp === 'number') setSpeed(sp);
         } catch { /* transporte aún no listo */ }
@@ -182,6 +186,7 @@ export default function PlayPage() {
       <div className="relative mx-auto w-full max-w-[1440px] px-3 pb-8 md:px-5">
         <ResourceBar stock={stock} />
         <SpeedControl speed={speed} transport={transport} explored={explored} onSpeed={changeSpeed} />
+        <SiegeBar siege={siege} />
 
         <div className="mt-3 grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
           {/* Columna principal: mapa + inspección */}
