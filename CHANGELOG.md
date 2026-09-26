@@ -2,6 +2,13 @@
 
 Todos los cambios documentados por checkpoint (tags `v*`).
 
+## [sin tag] — Root R1: escasez + deadline + quest + juice
+- Minas con veta finita (30) y aviso ⛏ de agotada; guardado v7.
+- Reloj de asedio visible (cuenta atrás + oleada x/10) y quest de 3 pasos
+  con resaltado en el menú; juice mínimo (números flotantes + SFX synth).
+- Ver `docs/devlog/036-root-r1.md` y plan `docs/superpowers/plans/2026-09-27-root-rework-r1.md`.
+- Verificación: 159 unit, tsc limpio, build OK, e2e 2/2, lint sin nuevos.
+
 ## [sin tag] — UI y mapa puros
 - Primitivas compartidas (`ui.tsx`: Card/SectionTitle/Chip/Warn) en todo
   el HUD, landing y guía; foco visible y selección ámbar; mapa suavizado
