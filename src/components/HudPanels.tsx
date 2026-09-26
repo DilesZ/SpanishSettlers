@@ -123,10 +123,12 @@ export interface TransportInfo {
 export function SpeedControl({
   speed,
   transport,
+  explored,
   onSpeed,
 }: {
   speed: number;
   transport: TransportInfo | null;
+  explored: number | null;
   onSpeed: (s: number) => void;
 }) {
   return (
@@ -157,6 +159,11 @@ export function SpeedControl({
           📦 {transport.waiting} en pilas · 🚚 {transport.inTransit} en ruta
           {transport.congested > 0 && (
             <b className="ml-2 text-red-200">⚠ {transport.congested} atasco(s)</b>
+          )}
+          {explored !== null && (
+            <span className="ml-2" title="Mapa explorado">
+              🗺 {explored}%
+            </span>
           )}
         </span>
       )}

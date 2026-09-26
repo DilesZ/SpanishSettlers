@@ -19,6 +19,7 @@ import { initCameraGrade, setNightGrade, attachBuildingShadow, selectGlow, disca
 import { initWeather, stopWeather, registerWeatherCloud, type Weather } from '../fx/weather';
 import { dustBurst, builtBurst, chopBurst, hitFlash, recruitRing, harvestSparkle, smokeColumn, splashPuff, stepPuff } from '../fx/vfx';
 import { hasLivingWood, nearestLivingWood, terrainSpeed, type NatureNode } from '../systems/terrain';
+import { createFog, deserializeFog, EXPLORED, exploredPercent, fogAt, HIDDEN, isExplored, revealCircle, serializeFog, settleFog, VISIBLE, type FogGrid } from '../systems/fog';
 import { computeEdges, placeEdges } from '../fx/edges';
 
 // Rama B: arte GPL de Widelands (ver docs/ATRIBUCION.md + wlArt.ts).
@@ -63,6 +64,8 @@ interface Walker {
   foe: Enemy | null;
   /** Throttle de polvo de pasos (siguiente tiempo permitido, ms de escena). */
   dustT: number;
+  /** Tarea especial: 'scout' = explorador (usa anims de settler teñido). */
+  task?: 'scout';
 }
 
 interface Enemy {
@@ -128,6 +131,12 @@ export class GameScene extends Phaser.Scene {
   // Rebrotan en 60-90 s si la loseta sigue libre.
   private treeNodes: (NatureNode & { spr?: Phaser.GameObjects.GameObject | null })[] = [];
   private rockNodes: (NatureNode & { spr?: Phaser.GameObjects.GameObject | null })[] = [];
+  // ---------- Niebla de guerra (council exploración: ver para construir) ---
+  // Solo información: la sim no cambia, pero construir e inspeccionar exigen
+  // loseta vista. Los exploradores la disipan; el rival se avista de verdad.
+  private fog: FogGrid = createFog(MAP);
+  private fogGfx?: Phaser.GameObjects.Graphics;
+  private rivalSpotted = false;
   /** Velocidad de simulación x1/x2/x4 (ritmo web: S4 es lento, el navegador no). */
   private gameSpeed = 1;
   // ---------- Población (Fase 3): techo real, comida, moral y crecimiento ----------
@@ -396,6 +405,13 @@ export class GameScene extends Phaser.Scene {
     this.placeExtraInitial();
     this.setupRival();
     this.spawnPopulation();
+    // Niebla: la base empieza vista; el resto, por descubrir. Dos scouts.
+    this.fog = createFog(MAP);
+    revealCircle(this.fog, MAP, this.center.x, this.center.y, 8);
+    this.fogGfx = this.add.graphics().setDepth(9460);
+    this.drawFog();
+    this.spawnScout(this.center.x - 2, this.center.y + 2);
+    this.spawnScout(this.center.x + 2, this.center.y + 2);
     this.spawnCritters();
     this.setupAmbient();
     this.setupNight();
@@ -796,6 +812,7 @@ export class GameScene extends Phaser.Scene {
 
   private canPlace(id: BuildingId, tx: number, ty: number): boolean {
     if (tx < 1 || ty < 1 || tx >= MAP - 1 || ty >= MAP - 1) return false;
+    if (!isExplored(this.fog, MAP, tx, ty)) return false; // niebla: ver primero
     if (this.buildingTiles.has(`${tx},${ty}`)) return false;
     const t = terrainAt(tx, ty);
     if (t === 'water' || t === 'waterB' || t === 'waterC' || t === 'mountain') return false;
@@ -814,6 +831,7 @@ export class GameScene extends Phaser.Scene {
     tx = Math.round(tx);
     ty = Math.round(ty);
     if (tx < 1 || ty < 1 || tx >= MAP - 1 || ty >= MAP - 1) return false;
+    if (!isExplored(this.fog, MAP, tx, ty)) return false; // niebla: ver primero
     if (this.buildingTiles.has(`${tx},${ty}`)) return false;
     const t = terrainAt(tx, ty);
     return t !== 'water' && t !== 'waterB' && t !== 'waterC' && t !== 'mountain';
@@ -846,7 +864,10 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (!this.tryAddRoad(tx, ty)) {
-      this.hintText.setText('⛔ El camino no va en agua, montaña ni edificios').setY(44);
+      const msg = !isExplored(this.fog, MAP, tx, ty)
+        ? '🌫 Explora primero esa zona (manda exploradores)'
+        : '⛔ El camino no va en agua, montaña ni edificios';
+      this.hintText.setText(msg).setY(44);
       playSfx('error');
       this.time.delayedCall(1500, () => this.hintText.setText(''));
       return;
@@ -1722,8 +1743,9 @@ export class GameScene extends Phaser.Scene {
 
   private saveGame(silent = false): string | null {
     try {
+      const scouts = this.walkers.filter((w) => w.task === 'scout' && w.sprite.active).length;
       const data = {
-        v: 5,
+        v: 6,
         savedAt: Date.now(),
         stock: this.stock,
         aiStock: this.aiStock,
@@ -1736,6 +1758,9 @@ export class GameScene extends Phaser.Scene {
         doneObjectives: [...this.doneObjectives],
         transport: serializeTransport(this.transport),
         gameSpeed: this.gameSpeed,
+        fog: serializeFog(this.fog),
+        scouts,
+        rivalSpotted: this.rivalSpotted,
       };
       window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
       if (!silent) playSfx('confirm');
@@ -1757,6 +1782,9 @@ export class GameScene extends Phaser.Scene {
         waveNo: number; kills: number; wavesRepelled?: number; doneObjectives?: string[];
         transport?: unknown;
         gameSpeed?: number;
+        fog?: unknown;
+        scouts?: number;
+        rivalSpotted?: boolean;
       };
       if (!data || !Array.isArray(data.placed)) return false;
       // limpiar mundo
@@ -1807,6 +1835,12 @@ export class GameScene extends Phaser.Scene {
       this.morale = data.pop?.morale ?? 80;
       this.foodAcc = 0;
       this.transport = deserializeTransport((data as { transport?: unknown }).transport);
+      // Niebla v6 (las v5 y anteriores re-exploran la base al cargar).
+      this.fog = deserializeFog((data as { fog?: unknown }).fog, MAP);
+      this.rivalSpotted = data.rivalSpotted === true;
+      if (exploredPercent(this.fog) === 0) {
+        revealCircle(this.fog, MAP, this.center.x, this.center.y, 8);
+      }
       if (data.gameSpeed === 2 || data.gameSpeed === 4) this.gameSpeed = data.gameSpeed;
       else this.gameSpeed = 1;
       this.roads = deserializeRoads(data.roads);
@@ -1829,6 +1863,18 @@ export class GameScene extends Phaser.Scene {
       }
       this.spawnPopulation();
       this.spawnCritters();
+      // Exploradores guardados: reconvierte paisanos (con tinte y velocidad).
+      const wantScouts = Math.min(6, Math.max(0, Math.floor(data.scouts ?? 0)));
+      let made = 0;
+      for (const w of this.walkers) {
+        if (made >= wantScouts) break;
+        if (w.kind !== 'settler' || w.faction !== 'player' || w.role !== 'settler' || w.task === 'scout') continue;
+        w.task = 'scout';
+        w.speed = 88;
+        w.sprite.setTint(0x9fd8ff);
+        made++;
+        this.assignJob(w);
+      }
       // El censo manda: reponer caminantes visibles hasta el nivel guardado.
       let guard = 0;
       const settlerCount = () => this.walkers.filter((w) => w.kind === 'settler' && w.faction === 'player').length;
@@ -1852,6 +1898,7 @@ export class GameScene extends Phaser.Scene {
       }
       this.updateHud();
       this.drawTerritoryPosts();
+      this.drawFog();
       playSfx('confirm');
       this.hintText?.setText('💾 Partida cargada').setY(44);
       this.time.delayedCall(3000, () => this.hintText.setText(''));
@@ -1945,7 +1992,7 @@ export class GameScene extends Phaser.Scene {
     const role = army % 2 === 0 ? 'soldier' : 'archer';
     // Reclutar viste a un colono (no aparece de la nada); si no hay
     // paisanos libres, llega uno nuevo (el censo lo refleja).
-    const volunteer = this.walkers.find((x) => x.kind === 'settler' && x.faction === 'player' && x.role === 'settler' && x.sprite.active);
+    const volunteer = this.walkers.find((x) => x.kind === 'settler' && x.faction === 'player' && x.role === 'settler' && x.task !== 'scout' && x.sprite.active);
     if (volunteer) {
       volunteer.role = role;
       volunteer.loaded = false;
@@ -1989,6 +2036,14 @@ export class GameScene extends Phaser.Scene {
       const nx = Phaser.Math.Clamp(cur.x + Phaser.Math.Between(-4, 4), 2, MAP - 3);
       const ny = Phaser.Math.Clamp(cur.y + Phaser.Math.Between(-4, 4), 2, MAP - 3);
       if (!this.sendWalker(w, nx, ny)) this.rest(w, 1 + Math.random() * 2);
+      return;
+    }
+    // Explorador: camina a lo inexplorado y repite (revela r6 al andar).
+    if (w.task === 'scout') {
+      const t = this.scoutTarget();
+      if (!this.sendWalker(w, t.x, t.y, () => this.assignJob(w))) {
+        this.rest(w, 1 + Math.random() * 2, () => this.assignJob(w));
+      }
       return;
     }
     const cabana = this.placed.find((p) => p.id === 'cabanaLenador');
@@ -2242,6 +2297,12 @@ export class GameScene extends Phaser.Scene {
         this.time.delayedCall(1500, () => this.hintText.setText(''));
         return false;
       }
+      if (!isExplored(this.fog, MAP, tx, ty)) {
+        this.hintText.setText('🌫 Explora primero esa zona (manda exploradores)').setY(44);
+        playSfx('error');
+        this.time.delayedCall(1500, () => this.hintText.setText(''));
+        return false;
+      }
       const terr = terrainAt(Math.floor(tx), Math.floor(ty));
       if (terr === 'water' || terr === 'waterB' || terr === 'waterC' || terr === 'mountain') {
         this.hintText.setText('⛔ Terreno no válido para construir').setY(44);
@@ -2367,6 +2428,8 @@ export class GameScene extends Phaser.Scene {
     if (id === 'torre' && owner === 'player') {
       this.territoryRadius += 1.5;
       this.drawTerritoryPosts();
+      // Cada torre suma un explorador (la expansión exige ojos).
+      this.spawnScout(tx + 1, ty + 1);
     }
     if (id === 'cuartel' && owner === 'player') {
       if (!free) playSfx('sword');
@@ -2512,6 +2575,7 @@ export class GameScene extends Phaser.Scene {
       this.stock[k as ResourceId] = (this.stock[k as ResourceId] ?? 0) + (v ?? 0);
     }
     this.refreshPiles();
+    this.refreshFog();
     this.aiStock = tickAutoProducers(this.aiStock, this.placed.filter((p) => p.owner === 'rival').map((p) => p.id), this.econTickNo);
     const recipeByBuilding: Partial<Record<BuildingId, string>> = RECIPE_BY_BUILDING;
     for (const p of this.placed) {
@@ -2625,6 +2689,89 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Dibuja la niebla: oculta casi negra, explorada tenue (1 objeto). */
+  private drawFog() {
+    const g = this.fogGfx;
+    if (!g) return;
+    g.clear();
+    for (let ty = 0; ty < MAP; ty++) {
+      for (let tx = 0; tx < MAP; tx++) {
+        const s = this.fog[ty * MAP + tx];
+        if (s === VISIBLE) continue;
+        const { x, y } = this.iso(tx, ty);
+        g.fillStyle(0x060a08, s === EXPLORED ? 0.28 : 0.62);
+        g.fillEllipse(x, y, TILE_W, TILE_H);
+      }
+    }
+  }
+
+  /**
+   * Un tick de niebla: asienta lo visible y re-revela desde edificios
+   * propios (r5, almacén r7) y caminantes (r3, scouts r6). Detecta el primer
+   * avistamiento rival (sustituye el aviso por temporizador).
+   */
+  private refreshFog() {
+    let preVisible = 0;
+    for (let i = 0; i < this.fog.length; i++) {
+      if (this.fog[i] === VISIBLE) preVisible++;
+    }
+    settleFog(this.fog);
+    let fresh = 0;
+    for (const p of this.placed) {
+      if (p.owner !== 'player') continue;
+      fresh += revealCircle(this.fog, MAP, p.tx, p.ty, p.id === 'almacen' ? 7 : 5);
+    }
+    for (const w of this.walkers) {
+      if (w.kind !== 'settler' || w.faction !== 'player' || !w.sprite.active) continue;
+      const t = this.walkerTile(w);
+      fresh += revealCircle(this.fog, MAP, t.x, t.y, w.task === 'scout' ? 6 : 3);
+    }
+    if (fresh > 0 || preVisible > 0) this.drawFog();
+    if (!this.rivalSpotted && this.gameStatus === 'playing') {
+      const seen = this.placed.some(
+        (p) => p.owner === 'rival' && fogAt(this.fog, MAP, p.tx, p.ty) === VISIBLE,
+      );
+      if (seen) {
+        this.rivalSpotted = true;
+        this.hintText?.setText('⚔ ¡Exploradores avistan otra colonia al otro lado!').setY(44);
+        playSfx('sword');
+        this.time.delayedCall(5000, () => this.hintText.setText(''));
+      }
+    }
+  }
+
+  /** Crea un explorador: colono teñido, rápido, que busca lo inexplorado. */
+  private spawnScout(tx: number, ty: number) {
+    const scouts = this.walkers.filter((w) => w.task === 'scout' && w.sprite.active).length;
+    if (scouts >= 6) return;
+    const { x, y } = this.iso(
+      Phaser.Math.Clamp(Math.round(tx), 2, MAP - 3),
+      Phaser.Math.Clamp(Math.round(ty), 2, MAP - 3),
+    );
+    const s = this.add.sprite(x, y - 15, 'wl-settler-e', 0).setDepth(8000);
+    s.setScale(wlWorkerScale(WL_WORKERS.settler?.dirs.e?.fh ?? 42));
+    s.setTint(0x9fd8ff);
+    if (this.anims.exists('wl-walk-settler-e')) s.play('wl-walk-settler-e');
+    const shadow = this.add.image(x, y - 1, 'shadow').setDepth(7999).setAlpha(0.6).setScale(1.2);
+    const w = this.makeWalker(s, shadow, 'settler', 'settler');
+    w.task = 'scout';
+    w.speed = 88;
+    this.assignJob(w);
+  }
+
+  /** Destino scout: loseta inexplorada al azar (20 intentos) o paseo. */
+  private scoutTarget(): GridPos {
+    for (let i = 0; i < 20; i++) {
+      const nx = Phaser.Math.Between(2, MAP - 3);
+      const ny = Phaser.Math.Between(2, MAP - 3);
+      if (fogAt(this.fog, MAP, nx, ny) === HIDDEN) return { x: nx, y: ny };
+    }
+    return {
+      x: Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-8, 8)), 2, MAP - 3),
+      y: Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-8, 8)), 2, MAP - 3),
+    };
+  }
+
   /** Marca ⚠ sobre el edificio parado por falta de insumos (Fase 2). */
   private refreshStall(p: { id: BuildingId; tx: number; ty: number }, recipeId: string, stalled: boolean) {
     const k = `${p.tx},${p.ty}`;
@@ -2685,7 +2832,7 @@ export class GameScene extends Phaser.Scene {
   /** Un colono hace las maletas y abandona la colonia por el borde. */
   private emigrateOne() {
     const leaver = this.walkers.find((w) =>
-      w.kind === 'settler' && w.faction === 'player' && w.sprite.active && w.role !== 'soldier' && w.role !== 'archer');
+      w.kind === 'settler' && w.faction === 'player' && w.sprite.active && w.role !== 'soldier' && w.role !== 'archer' && w.task !== 'scout');
     this.popCount = Math.max(0, this.popCount - 1);
     if (!leaver) return;
     // Deja lo que lleve y se va (al llegar se disuelve sin recontar).
@@ -2734,11 +2881,7 @@ export class GameScene extends Phaser.Scene {
     if (hut) this.tryPlace('cabanaLenador', hut.x, hut.y, true, 'rival');
     const crew: string[] = ['woodcutter', 'carrier', 'settler', 'miner', 'carrier'];
     for (const role of crew) this.spawnRivalWorker(role);
-    this.time.delayedCall(25000, () => {
-      if (this.gameStatus !== 'playing' || !this.rivalAlive()) return;
-      this.hintText?.setText('⚔ Exploradores avistan otra colonia al otro lado...').setY(44);
-      this.time.delayedCall(5000, () => this.hintText.setText(''));
-    });
+    // El avistamiento lo dispara refreshFog al ver un edificio rival de verdad.
   }
 
   /** Primera loseta libre en espiral alrededor de la base rival.
@@ -2885,6 +3028,7 @@ export class GameScene extends Phaser.Scene {
         pop: () => { pop: number; cap: number; morale: number; eating: number };
         stalls: () => { id: BuildingId; nombre: string; tx: number; ty: number; faltan: string[] }[];
         transport: () => { waiting: number; inTransit: number; congested: number };
+        map: () => { explored: number };
         speed: () => number;
         setSpeed: (s: number) => void;
         stock: () => Stock;
@@ -2950,6 +3094,7 @@ export class GameScene extends Phaser.Scene {
         inTransit: this.transport.queue.reduce((a, l) => a + l.amount, 0),
         congested: congestedKeys(this.transport, 6).length,
       }),
+      map: () => ({ explored: exploredPercent(this.fog) }),
       speed: () => this.gameSpeed,
       setSpeed: (s: number) => {
         this.gameSpeed = s === 4 ? 4 : s === 2 ? 2 : 1;
@@ -3004,6 +3149,7 @@ export class GameScene extends Phaser.Scene {
         }
       },
       inspect: (tx: number, ty: number) => {
+        if (!isExplored(this.fog, MAP, tx, ty)) return null; // niebla: sin info
         const p = this.placed.find((q) => q.tx === tx && q.ty === ty);
         if (!p) return null;
         const def = BUILDINGS[p.id];

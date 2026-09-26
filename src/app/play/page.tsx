@@ -51,6 +51,7 @@ export default function PlayPage() {
   const [ending, setEnding] = useState<{ status: string; wave: number; kills: number; buildings: number; timeSec: number } | null>(null);
   const [speed, setSpeed] = useState(1);
   const [transport, setTransport] = useState<TransportInfo | null>(null);
+  const [explored, setExplored] = useState<number | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -63,6 +64,7 @@ export default function PlayPage() {
           stalls: () => Stall[];
           pop: () => Pop;
           transport: () => TransportInfo;
+          map: () => { explored: number };
           speed: () => number;
           setSpeed: (s: number) => void;
         };
@@ -86,6 +88,8 @@ export default function PlayPage() {
         try {
           const tr = w.__game?.transport();
           if (tr) setTransport(tr);
+          const mp = w.__game?.map();
+          if (mp && typeof mp.explored === 'number') setExplored(mp.explored);
           const sp = w.__game?.speed();
           if (typeof sp === 'number') setSpeed(sp);
         } catch { /* transporte aún no listo */ }
@@ -177,7 +181,7 @@ export default function PlayPage() {
 
       <div className="relative mx-auto w-full max-w-[1440px] px-3 pb-8 md:px-5">
         <ResourceBar stock={stock} />
-        <SpeedControl speed={speed} transport={transport} onSpeed={changeSpeed} />
+        <SpeedControl speed={speed} transport={transport} explored={explored} onSpeed={changeSpeed} />
 
         <div className="mt-3 grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
           {/* Columna principal: mapa + inspección */}
@@ -223,6 +227,7 @@ export default function PlayPage() {
                 <li><b className="text-amber-200">2.</b> Come: granja → molino → panadería + pozo.</li>
                 <li><b className="text-amber-200">3.</b> Forja: minas → fundición → armería → cuartel.</li>
                 <li><b className="text-amber-200">4.</b> Une todo con 🛤 caminos: sin camino la mercancía tarda (📦 pilas, 🚚 atascos).</li>
+                <li><b className="text-amber-200">6.</b> Explora con 🔭 (cada torre suma uno): la 🌫 niebla esconde terreno y al rival.</li>
                 <li><b className="text-amber-200">5.</b> Vigila ⚠ paradas y guarnece torres: el rival ataca.</li>
               </ol>
             </section>

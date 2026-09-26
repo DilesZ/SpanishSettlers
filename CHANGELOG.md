@@ -2,6 +2,14 @@
 
 Todos los cambios documentados por checkpoint (tags `v*`).
 
+## [sin tag] — Niebla de guerra + exploradores (council exploración)
+- Ver para construir: niebla oculta/explorada/visible, caminos y fichas
+  bloqueados en lo oculto, % de mapa 🗺 en el HUD (ver
+  `docs/devlog/034-niebla-exploradores.md`).
+- Exploradores rápidos que disipan niebla (2 + 1 por torre, tope 6); el
+  rival se avista de verdad al ver su base; guardado v6.
+- Verificación: 155 unit, tsc limpio, build OK, lint sin errores nuevos.
+
 ## [sin tag] — Transporte causal + terreno vivo (council Fase 1)
 - Buffers locales por edificio, cola con prioridades (comida primero) y ETA
   por caminos; porteadores causales (1 ud. real), pilas físicas y avisos 🚚
