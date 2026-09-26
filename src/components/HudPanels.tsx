@@ -4,11 +4,7 @@
 
 import type { BuildingId, ResourceId } from '@/game/data/buildings';
 import { iconFallback, iconFor, onImgFallback, resIconFor } from './hud-icons';
-
-// Estilo unificado de tarjeta (verde noche + ámbar, tipografía del sistema).
-const CARD =
-  'rounded-xl border border-amber-200/15 bg-gradient-to-b from-white/[0.07] to-white/[0.02] shadow-[0_10px_30px_-15px_rgba(0,0,0,0.8)]';
-const CARD_TITLE = 'text-[11px] font-bold uppercase tracking-[0.18em] text-amber-200/90';
+import { Card, Chip, SectionTitle, Warn } from './ui';
 
 // ---------------------------------------------------------------- TopBar ---
 
@@ -135,9 +131,9 @@ export function SpeedControl({
     <div
       role="toolbar"
       aria-label="Velocidad y transporte"
-      className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200/15 bg-[#101a12]/95 px-3 py-2"
+      className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-amber-200/15 bg-[#101a12]/95 px-3 py-2 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]"
     >
-      <span className="text-[11px] font-bold tracking-[0.18em] text-amber-200/90 uppercase">
+      <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-200/90">
         ⏩ Ritmo
       </span>
       {[1, 2, 4].map((s) => (
@@ -208,11 +204,11 @@ export function ColonyPanel({ objectives, pop, stalls, stock }: ColonyPanelProps
   const done = objectives.filter((o) => o.done).length;
 
   return (
-    <section aria-label="Estado de la colonia" className={`${CARD} space-y-4 p-4`}>
+    <Card label="Estado de la colonia">
       {objectives.length > 0 && (
         <div>
           <div className="flex items-baseline justify-between gap-2">
-            <h2 className={CARD_TITLE}>🏆 Objetivos</h2>
+            <SectionTitle>🏆 Objetivos</SectionTitle>
             <span className="text-[11px] font-bold text-amber-100/80 tabular-nums">
               {done}/{objectives.length}
             </span>
@@ -252,47 +248,41 @@ export function ColonyPanel({ objectives, pop, stalls, stock }: ColonyPanelProps
 
       {pop && (
         <div className="border-t border-white/[0.07] pt-3">
-          <h2 className={CARD_TITLE}>👥 Población</h2>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-            <span
+          <SectionTitle>👥 Población</SectionTitle>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Chip
               title="Población / vivienda"
-              className={`rounded-full border px-2.5 py-1 font-bold tabular-nums ${
+              className={
                 pop.pop >= pop.cap
-                  ? 'border-red-400/50 bg-red-500/15 text-red-100'
-                  : 'border-white/10 bg-white/[0.05] text-amber-50'
-              }`}
+                  ? '!border-red-400/50 !bg-red-500/15 !text-red-100'
+                  : ''
+              }
             >
               👥 {pop.pop}/{pop.cap}
-            </span>
-            <span
-              title="Moral de la colonia"
-              className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 font-semibold text-amber-50 tabular-nums"
-            >
+            </Chip>
+            <Chip title="Moral de la colonia">
               {moraleFace(pop.morale)} {pop.morale}
-            </span>
-            <span
-              title="Comida consumida por segundo"
-              className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-amber-100/75 tabular-nums"
-            >
+            </Chip>
+            <Chip title="Comida consumida por segundo">
               🍞 −{pop.eating.toFixed(1)}/s
-            </span>
+            </Chip>
           </div>
           {pop.pop >= pop.cap && (
-            <p className="mt-2 rounded-lg border border-red-400/40 bg-red-500/10 px-2.5 py-1.5 text-xs font-semibold text-red-100">
-              ⚠ Sin vivienda: la colonia no crece. Construye casas.
-            </p>
+            <div className="mt-2">
+              <Warn>⚠ Sin vivienda: la colonia no crece. Construye casas.</Warn>
+            </div>
           )}
           {stock && (stock.pan ?? 0) + (stock.pez ?? 0) <= 0.5 && (
-            <p className="mt-2 rounded-lg border border-red-400/40 bg-red-500/10 px-2.5 py-1.5 text-xs font-semibold text-red-100">
-              ⚠ Sin comida: tus colonos pasan hambre.
-            </p>
+            <div className="mt-2">
+              <Warn>⚠ Sin comida: tus colonos pasan hambre.</Warn>
+            </div>
           )}
         </div>
       )}
 
       {stalls.length > 0 && (
         <div className="border-t border-white/[0.07] pt-3">
-          <h2 className={`${CARD_TITLE} !text-red-200/90`}>⚠ Producción parada ({stalls.length})</h2>
+          <h2 className="text-[11px] font-bold uppercase tracking-[0.18em] text-red-200/90">⚠ Producción parada ({stalls.length})</h2>
           <ul className="mt-2 space-y-1.5">
             {stalls.map((s) => (
               <li
@@ -306,7 +296,7 @@ export function ColonyPanel({ objectives, pop, stalls, stock }: ColonyPanelProps
           </ul>
         </div>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -334,18 +324,10 @@ export function InspectCard({ inspect, onClose, onRecruit }: InspectCardProps) {
   return (
     <section
       aria-label={`Inspección: ${inspect.nombre}`}
-      className={`${CARD} relative overflow-hidden p-4 ${
-        isRival ? '!border-red-400/40' : '!border-amber-300/30'
+      className={`rounded-2xl border bg-[#101a12]/95 p-4 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)] ${
+        isRival ? 'border-red-400/40' : 'border-amber-200/15'
       }`}
     >
-      <div
-        aria-hidden
-        className={`pointer-events-none absolute inset-x-0 top-0 h-1 ${
-          isRival
-            ? 'bg-gradient-to-r from-red-500/70 via-red-400/30 to-transparent'
-            : 'bg-gradient-to-r from-amber-300/80 via-amber-300/25 to-transparent'
-        }`}
-      />
       <div className="flex items-start gap-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img

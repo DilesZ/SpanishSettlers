@@ -38,7 +38,7 @@ export function BuildMenu({ selected, roadMode, rival, stock, onBuild, onRoad }:
       : '(elige un edificio)';
 
   return (
-    <section aria-label="Menú de construcción" className="mt-3 overflow-hidden rounded-2xl border border-amber-200/15 bg-[#101a12]/95 shadow-[0_18px_50px_-20px_rgba(0,0,0,0.9)]">
+    <section aria-label="Menú de construcción" className="mt-3 overflow-hidden rounded-2xl border border-amber-200/15 bg-[#101a12]/95 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]">
       {/* Barra del muelle: estado + camino siempre visible + rival */}
       <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.07] bg-white/[0.03] px-3 py-2.5 md:px-4">
         <h2 className="mr-auto text-sm font-bold text-amber-100">

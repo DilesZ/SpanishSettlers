@@ -499,7 +499,7 @@ export class GameScene extends Phaser.Scene {
     }
     // marcador hover (diamante)
     this.hoverMarker = this.add.graphics().setDepth(9400);
-    this.hoverMarker.lineStyle(2, 0xfde68a, 0.9);
+    this.hoverMarker.lineStyle(2, 0xfde68a, 0.75);
     this.hoverMarker.beginPath();
     this.hoverMarker.moveTo(0, -TILE_H / 2);
     this.hoverMarker.lineTo(TILE_W / 2, 0);
@@ -510,7 +510,7 @@ export class GameScene extends Phaser.Scene {
     this.hoverMarker.setVisible(false);
 
     const c = this.iso(this.center.x, this.center.y);
-    this.territoryFill = this.add.ellipse(c.x, c.y - 8, this.territoryRadius * 136, this.territoryRadius * 68, 0xfbbf24, 0.06).setDepth(9390);
+    this.territoryFill = this.add.ellipse(c.x, c.y - 8, this.territoryRadius * 136, this.territoryRadius * 68, 0xfbbf24, 0.05).setDepth(9390);
     this.drawTerritoryPosts();
     this.placeFoam();
     placeEdges(this, computeEdges(terrainAt, MAP), (tx, ty) => this.iso(tx, ty));
@@ -2699,7 +2699,7 @@ export class GameScene extends Phaser.Scene {
         const s = this.fog[ty * MAP + tx];
         if (s === VISIBLE) continue;
         const { x, y } = this.iso(tx, ty);
-        g.fillStyle(0x060a08, s === EXPLORED ? 0.28 : 0.62);
+        g.fillStyle(0x060a08, s === EXPLORED ? 0.22 : 0.55);
         g.fillEllipse(x, y, TILE_W, TILE_H);
       }
     }

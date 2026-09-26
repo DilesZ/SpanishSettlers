@@ -53,11 +53,11 @@ export const EDGE_DEPTH: Record<EdgeKind, number> = {
   cliffshade: 35,
 };
 
-/** Alfa sutil por banda (rango pedido: 0.25-0.45). */
+/** Alfa sutil por banda (pureza: transiciones que se insinúan, no gritan). */
 export const EDGE_ALPHA: Record<EdgeKind, number> = {
-  shore: 0.35,
-  treeshade: 0.3,
-  cliffshade: 0.4,
+  shore: 0.3,
+  treeshade: 0.25,
+  cliffshade: 0.35,
 };
 
 export function isWaterTerrain(t: string): boolean {

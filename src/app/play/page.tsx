@@ -186,7 +186,7 @@ export default function PlayPage() {
         <div className="mt-3 grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
           {/* Columna principal: mapa + inspección */}
           <div className="min-w-0 space-y-3">
-            <section aria-label="Mapa de la colonia" className="overflow-hidden rounded-2xl border border-amber-200/20 bg-[#0d1f16] shadow-[0_24px_60px_-24px_rgba(0,0,0,0.9)]">
+            <section aria-label="Mapa de la colonia" className="overflow-hidden rounded-2xl border border-amber-200/15 bg-[#0d1f16] shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-white/[0.07] bg-white/[0.03] px-3 py-2 md:px-4">
                 <span aria-hidden className="flex gap-1.5">
                   <i className="h-2.5 w-2.5 rounded-full bg-red-400/70" />
@@ -218,8 +218,8 @@ export default function PlayPage() {
           {/* Columna lateral: estado + ayuda */}
           <aside className="min-w-0 space-y-3">
             <ColonyPanel objectives={objectives} pop={pop} stalls={stalls} stock={stock} />
-            <section aria-label="Ayuda rápida" className="rounded-xl border border-amber-200/15 bg-gradient-to-b from-white/[0.07] to-white/[0.02] p-4">
-              <h2 className="text-[11px] font-bold tracking-[0.18em] text-amber-200/90 uppercase">
+            <section aria-label="Ayuda rápida" className="rounded-2xl border border-amber-200/15 bg-[#101a12]/95 p-4 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]">
+              <h2 className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-200/90">
                 🧭 Guía del colono
               </h2>
               <ol className="mt-2 space-y-1.5 text-xs leading-5 text-amber-50/85">

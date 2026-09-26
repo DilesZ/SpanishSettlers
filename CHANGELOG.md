@@ -2,6 +2,13 @@
 
 Todos los cambios documentados por checkpoint (tags `v*`).
 
+## [sin tag] — UI y mapa puros
+- Primitivas compartidas (`ui.tsx`: Card/SectionTitle/Chip/Warn) en todo
+  el HUD, landing y guía; foco visible y selección ámbar; mapa suavizado
+  (niebla, bordes, territorio, hover) — ver
+  `docs/devlog/035-ui-mapa-puros.md`.
+- Verificación: 155 unit, tsc limpio, build OK, e2e 2/2, lint sin nuevos.
+
 ## [sin tag] — Niebla de guerra + exploradores (council exploración)
 - Ver para construir: niebla oculta/explorada/visible, caminos y fichas
   bloqueados en lo oculto, % de mapa 🗺 en el HUD (ver

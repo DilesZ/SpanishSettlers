@@ -56,7 +56,7 @@ export default function Home() {
 
           <dl className="mx-auto mt-7 grid max-w-lg grid-cols-4 gap-2">
             {STATS.map((s) => (
-              <div key={s.label} className="rounded-xl border border-white/10 bg-black/30 px-2 py-3">
+              <div key={s.label} className="rounded-2xl border border-white/10 bg-black/30 px-2 py-3">
                 <dt className="order-2 mt-1 block text-[10px] font-semibold tracking-wider text-amber-100/60 uppercase">
                   {s.label}
                 </dt>
@@ -66,14 +66,14 @@ export default function Home() {
           </dl>
 
           <div className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <figure className="overflow-hidden rounded-2xl border border-amber-200/20 shadow-lg">
+            <figure className="overflow-hidden rounded-2xl border border-amber-200/15">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/shot-dia.png" alt="Colonia de día con trigales, fauna y barcos" className="w-full" />
               <figcaption className="bg-black/50 px-3 py-2 text-left text-xs text-amber-100/75">
                 ☀ De día: trigales, fauna y barcos
               </figcaption>
             </figure>
-            <figure className="overflow-hidden rounded-2xl border border-amber-200/20 shadow-lg">
+            <figure className="overflow-hidden rounded-2xl border border-amber-200/15">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/shot-noche.png" alt="Colonia de noche con faroles y estrellas" className="w-full" />
               <figcaption className="bg-black/50 px-3 py-2 text-left text-xs text-amber-100/75">
@@ -84,7 +84,7 @@ export default function Home() {
 
           <div className="mt-4 grid grid-cols-1 gap-2 text-left sm:grid-cols-3">
             {CHAIN.map((c) => (
-              <div key={c.title} className="rounded-xl border border-white/10 bg-black/30 p-4">
+              <div key={c.title} className="rounded-2xl border border-white/10 bg-black/30 p-4">
                 <div aria-hidden className="text-2xl">{c.glyph}</div>
                 <h2 className="mt-1.5 text-sm font-black text-amber-100">{c.title}</h2>
                 <p className="mt-1 text-xs leading-5 text-amber-50/75">{c.text}</p>
@@ -93,9 +93,9 @@ export default function Home() {
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-2 text-left text-xs sm:grid-cols-3">
-            <div className="rounded-xl bg-amber-300/[0.07] p-3 text-amber-50/85">🌾 <b className="text-amber-200">Economía viva:</b> 16 recursos, recetas, caminos, puerto y cosechas.</div>
-            <div className="rounded-xl bg-amber-300/[0.07] p-3 text-amber-50/85">⚔️ <b className="text-amber-200">Rival y defensa:</b> una colonia IA que crece, comercia y ataca; torres y 10 oleadas hasta la victoria.</div>
-            <div className="rounded-xl bg-amber-300/[0.07] p-3 text-amber-50/85">💾 <b className="text-amber-200">Tu ritmo:</b> guardado automático, objetivos y minimapa.</div>
+            <div className="rounded-2xl border border-white/10 bg-black/30 p-3 text-amber-50/85">🌾 <b className="text-amber-200">Economía viva:</b> 16 recursos, recetas, caminos, puerto y cosechas.</div>
+            <div className="rounded-2xl border border-white/10 bg-black/30 p-3 text-amber-50/85">⚔️ <b className="text-amber-200">Rival y defensa:</b> una colonia IA que crece, comercia y ataca; torres y 10 oleadas hasta la victoria.</div>
+            <div className="rounded-2xl border border-white/10 bg-black/30 p-3 text-amber-50/85">💾 <b className="text-amber-200">Tu ritmo:</b> guardado automático, objetivos y minimapa.</div>
           </div>
 
           <p className="mt-6 text-[11px] leading-5 text-amber-100/45">
