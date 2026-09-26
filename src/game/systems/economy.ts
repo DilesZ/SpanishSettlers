@@ -62,19 +62,34 @@ export function tickAutoProducers(stock: Stock, buildingIds: BuildingId[], tickN
  * por perf (misma regla económica, distinto transporte: deuda documentada).
  * `consumePan` descuenta el pan de mina del stock central al producir.
  */
+export interface Placement {
+  id: BuildingId;
+  key: string;
+  /** Reserva restante de la veta (solo minas). undefined = infinita. */
+  reserve?: number;
+}
+
 export function produceToBuffers(
   buffers: Record<string, Partial<Record<ResourceId, number>>>,
-  placements: { id: BuildingId; key: string }[],
+  placements: Placement[],
   central: Stock,
   tickNo = 0,
   capacityPerResource = 12,
-): { central: Stock; overflowKeys: string[] } {
+): { central: Stock; overflowKeys: string[]; depletedKeys: string[]; consumed: Record<string, number> } {
   const nextCentral = { ...central };
   const overflowKeys: string[] = [];
+  const depletedKeys: string[] = [];
+  const consumed: Record<string, number> = {};
   for (const p of placements) {
     const rule = AUTO_RULES[p.id];
     if (!rule) continue;
-    if ((p.id === 'minaCarbon' || p.id === 'minaHierro' || p.id === 'minaOro') && tickNo % 4 !== 0) continue;
+    const isMine = p.id === 'minaCarbon' || p.id === 'minaHierro' || p.id === 'minaOro';
+    if (isMine && tickNo % 4 !== 0) continue;
+    // R1: veta agotada = la mina para y avisa (escasez real con coste).
+    if (isMine && (p.reserve ?? Infinity) <= 0) {
+      depletedKeys.push(p.key);
+      continue;
+    }
     if (!canAfford(nextCentral, rule.in)) continue;
     for (const [k, v] of Object.entries(rule.in)) nextCentral[k as ResourceId] -= v ?? 0;
     const buf = (buffers[p.key] ??= {});
@@ -86,8 +101,9 @@ export function produceToBuffers(
       buf[rk] = cur + add;
       if (add < (v ?? 0)) overflowKeys.push(p.key);
     }
+    if (isMine && p.reserve !== undefined) consumed[p.key] = (consumed[p.key] ?? 0) + 1;
   }
-  return { central: nextCentral, overflowKeys };
+  return { central: nextCentral, overflowKeys, depletedKeys, consumed };
 }
 
 export function payCost(stock: Stock, cost: Partial<Record<ResourceId, number>>): Stock {

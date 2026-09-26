@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canAfford, createInitialStock, militaryStrengthFactor, missingInputs, payCost, settlementValue, tickAutoProducers, tickJob } from '@/game/systems/economy';
+import { canAfford, createInitialStock, militaryStrengthFactor, missingInputs, payCost, produceToBuffers, settlementValue, tickAutoProducers, tickJob, type Stock } from '@/game/systems/economy';
 
 describe('economia', () => {
   it('stock inicial tiene madera y herramientas', () => {
@@ -53,6 +53,26 @@ describe('economia', () => {
     // sin pan la mina no produce
     const s2 = tickAutoProducers({ ...base, hierro: 0, pan: 0 }, ['minaHierro']);
     expect(s2.hierro).toBe(0);
+  });
+
+  it('la mina agota su veta y avisa (escasez R1)', () => {
+    const buffers: Record<string, Partial<Record<never, number>>> = {};
+    const central: Stock = { ...createInitialStock(), pan: 99 };
+    // Las minas producen en ticks múltiplos de 4 y comen pan.
+    const r1 = produceToBuffers(buffers, [{ id: 'minaHierro', key: '3,3', reserve: 1 }], central, 4);
+    expect(r1.depletedKeys).not.toContain('3,3');
+    expect(r1.consumed['3,3']).toBe(1);
+    const r2 = produceToBuffers(buffers, [{ id: 'minaHierro', key: '3,3', reserve: 0 }], r1.central, 8);
+    expect(r2.depletedKeys).toContain('3,3');
+    expect(r2.consumed['3,3'] ?? 0).toBe(0);
+  });
+
+  it('sin reserva la producción es infinita como antes', () => {
+    const buffers: Record<string, Partial<Record<never, number>>> = {};
+    const central: Stock = { ...createInitialStock(), pan: 99 };
+    const r = produceToBuffers(buffers, [{ id: 'cabanaLenador', key: '1,1' }], central, 7);
+    expect(r.depletedKeys).toEqual([]);
+    expect((buffers['1,1'] as Record<string, number>).madera).toBe(2);
   });
 
   it('las minas solo trabajan 1 de cada 4 ticks (pan sostenible)', () => {
