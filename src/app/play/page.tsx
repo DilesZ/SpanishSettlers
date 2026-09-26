@@ -6,7 +6,7 @@ import { playSfx, unlockAudio } from '@/game/audio';
 import { isMusicEnabled, setMusicEnabled, startMusic } from '@/game/music';
 import type { BuildingId } from '@/game/data/buildings';
 import { BuildMenu } from '@/components/BuildMenu';
-import { ColonyPanel, EndingOverlay, InspectCard, ResourceBar, TopBar } from '@/components/HudPanels';
+import { ColonyPanel, EndingOverlay, InspectCard, ResourceBar, SpeedControl, TopBar, type TransportInfo } from '@/components/HudPanels';
 
 // Dynamic import: el canvas pesado solo en cliente (skill bundle-dynamic-imports).
 const GameCanvas = dynamic(() => import('@/components/GameCanvas'), { ssr: false });
@@ -49,6 +49,8 @@ export default function PlayPage() {
   const [music, setMusic] = useState(true);
   const [objectives, setObjectives] = useState<{ id: string; text: string; done: boolean }[]>([]);
   const [ending, setEnding] = useState<{ status: string; wave: number; kills: number; buildings: number; timeSec: number } | null>(null);
+  const [speed, setSpeed] = useState(1);
+  const [transport, setTransport] = useState<TransportInfo | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -60,6 +62,9 @@ export default function PlayPage() {
           status: () => { status: string; wave: number; kills: number; buildings: number; timeSec: number; rival: number; aiBase: { x: number; y: number } | null; ai: { espada: number; pan: number; hierro: number; carbon: number; lingote: number; troops: number; raids: number } };
           stalls: () => Stall[];
           pop: () => Pop;
+          transport: () => TransportInfo;
+          speed: () => number;
+          setSpeed: (s: number) => void;
         };
       };
       if (w.__stock) setStock({ ...w.__stock });
@@ -78,6 +83,12 @@ export default function PlayPage() {
         if (sl) setStalls(sl);
         const pp = w.__game?.pop();
         if (pp) setPop(pp);
+        try {
+          const tr = w.__game?.transport();
+          if (tr) setTransport(tr);
+          const sp = w.__game?.speed();
+          if (typeof sp === 'number') setSpeed(sp);
+        } catch { /* transporte aún no listo */ }
       } catch { /* juego aún arrancando */ }
     }, 1000);
     return () => clearInterval(t);
@@ -90,8 +101,15 @@ export default function PlayPage() {
       save: () => string | null;
       load: () => boolean;
       hasSave: () => string | null;
+      setSpeed: (s: number) => void;
     };
   }).__game;
+
+  const changeSpeed = (s: number) => {
+    unlockAudio();
+    game()?.setSpeed(s);
+    setSpeed(s);
+  };
 
   const refreshSave = () => setSavedAt(game()?.hasSave() ?? null);
 
@@ -159,6 +177,7 @@ export default function PlayPage() {
 
       <div className="relative mx-auto w-full max-w-[1440px] px-3 pb-8 md:px-5">
         <ResourceBar stock={stock} />
+        <SpeedControl speed={speed} transport={transport} onSpeed={changeSpeed} />
 
         <div className="mt-3 grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
           {/* Columna principal: mapa + inspección */}
@@ -203,7 +222,7 @@ export default function PlayPage() {
                 <li><b className="text-amber-200">1.</b> Tala y cantea: cabaña + cantera primero.</li>
                 <li><b className="text-amber-200">2.</b> Come: granja → molino → panadería + pozo.</li>
                 <li><b className="text-amber-200">3.</b> Forja: minas → fundición → armería → cuartel.</li>
-                <li><b className="text-amber-200">4.</b> Une todo con 🛤 caminos: aceleran colonos.</li>
+                <li><b className="text-amber-200">4.</b> Une todo con 🛤 caminos: sin camino la mercancía tarda (📦 pilas, 🚚 atascos).</li>
                 <li><b className="text-amber-200">5.</b> Vigila ⚠ paradas y guarnece torres: el rival ataca.</li>
               </ol>
             </section>

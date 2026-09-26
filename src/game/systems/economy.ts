@@ -55,6 +55,41 @@ export function tickAutoProducers(stock: Stock, buildingIds: BuildingId[], tickN
   return next;
 }
 
+/**
+ * Council Fase 1: los productores vierten a su buffer local (bandera del
+ * edificio) en vez de teletransportar al stock global. Devuelve overflow por
+ * edificio (true = pila llena, goods-stuck). El rival sigue con stock global
+ * por perf (misma regla económica, distinto transporte: deuda documentada).
+ * `consumePan` descuenta el pan de mina del stock central al producir.
+ */
+export function produceToBuffers(
+  buffers: Record<string, Partial<Record<ResourceId, number>>>,
+  placements: { id: BuildingId; key: string }[],
+  central: Stock,
+  tickNo = 0,
+  capacityPerResource = 12,
+): { central: Stock; overflowKeys: string[] } {
+  const nextCentral = { ...central };
+  const overflowKeys: string[] = [];
+  for (const p of placements) {
+    const rule = AUTO_RULES[p.id];
+    if (!rule) continue;
+    if ((p.id === 'minaCarbon' || p.id === 'minaHierro' || p.id === 'minaOro') && tickNo % 4 !== 0) continue;
+    if (!canAfford(nextCentral, rule.in)) continue;
+    for (const [k, v] of Object.entries(rule.in)) nextCentral[k as ResourceId] -= v ?? 0;
+    const buf = (buffers[p.key] ??= {});
+    for (const [k, v] of Object.entries(rule.out)) {
+      const rk = k as ResourceId;
+      const cur = buf[rk] ?? 0;
+      const room = Math.max(0, capacityPerResource - cur);
+      const add = Math.min(room, v ?? 0);
+      buf[rk] = cur + add;
+      if (add < (v ?? 0)) overflowKeys.push(p.key);
+    }
+  }
+  return { central: nextCentral, overflowKeys };
+}
+
 export function payCost(stock: Stock, cost: Partial<Record<ResourceId, number>>): Stock {
   if (!canAfford(stock, cost)) throw new Error('Recursos insuficientes');
   const next = { ...stock };

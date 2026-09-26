@@ -111,6 +111,59 @@ export function ResourceBar({ stock }: { stock: Record<string, number> | null })
   );
 }
 
+// --------------------------------------------------- Speed + Transport ---
+// Council Fase 1: ritmo web x1/x2/x4 + estado causal (pilas y cola visibles).
+
+export interface TransportInfo {
+  waiting: number;
+  inTransit: number;
+  congested: number;
+}
+
+export function SpeedControl({
+  speed,
+  transport,
+  onSpeed,
+}: {
+  speed: number;
+  transport: TransportInfo | null;
+  onSpeed: (s: number) => void;
+}) {
+  return (
+    <div
+      role="toolbar"
+      aria-label="Velocidad y transporte"
+      className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200/15 bg-[#101a12]/95 px-3 py-2"
+    >
+      <span className="text-[11px] font-bold tracking-[0.18em] text-amber-200/90 uppercase">
+        ⏩ Ritmo
+      </span>
+      {[1, 2, 4].map((s) => (
+        <button
+          key={s}
+          onClick={() => onSpeed(s)}
+          aria-pressed={speed === s}
+          className={`rounded-full border px-3 py-1 text-xs font-black tabular-nums transition ${
+            speed === s
+              ? 'border-amber-300/60 bg-amber-300/20 text-amber-100'
+              : 'border-white/10 bg-white/[0.04] text-amber-100/70 hover:border-amber-200/40'
+          }`}
+        >
+          ×{s}
+        </button>
+      ))}
+      {transport && (
+        <span className="ml-auto text-[11px] text-amber-100/70 tabular-nums">
+          📦 {transport.waiting} en pilas · 🚚 {transport.inTransit} en ruta
+          {transport.congested > 0 && (
+            <b className="ml-2 text-red-200">⚠ {transport.congested} atasco(s)</b>
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------- ColonyPanel ---
 
 export interface Objective {

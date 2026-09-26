@@ -14,6 +14,9 @@
 // + tweens ACOTADOS (ninguno con repeat: -1: cada objeto se autodestruye).
 // Presupuesto por llamada: 1-11 objetos, vida < 1.2 s. 100% procedural y
 // original, sin assets de terceros.
+// Interacción terreno: chopBurst (talar: hojas + astillas + tocón visual en
+// escena), splashPuff (pesca/orilla: anillo + gotas), stepPuff (polvo leve
+// al andar por arena/camino: 1 objeto, 0.4 s).
 //
 // NOTA Phaser: solo `import type` (testeable en vitest/node). APIs
 // verificadas en 3.90: add.circle/add.ellipse (GameScene.setupParticles),
@@ -279,6 +282,66 @@ export function harvestSparkle(scene: Phaser.Scene, x: number, y: number): void 
         fadeOut(scene, sp, { duration: rnd(450, 650), y: sy - rnd(24, 48) });
       }
     }
+  } catch {
+    /* noop */
+  }
+}
+
+/**
+ * Tala: hojas verdes + astillas marrones que caen (one-shot).
+ * Enganche: GameScene.chopNearestTree cuando el leñador termina su ciclo.
+ */
+export function chopBurst(scene: Phaser.Scene, x: number, y: number): void {
+  try {
+    for (let i = 0; i < 5; i++) {
+      const leaf = scene.add.circle(x + rnd(-14, 14), y - rnd(30, 60), rnd(2, 3.5), 0x3f8f3f, 0.9);
+      leaf.setDepth(VFX_DEPTHS.sparkle);
+      ignoreOnMinimap(scene, [leaf]);
+      fadeOut(scene, leaf, { duration: rnd(500, 800), x: leaf.x + rnd(-30, 30), y: leaf.y + rnd(10, 30) });
+    }
+    for (let i = 0; i < 3; i++) {
+      const chip = scene.add.circle(x + rnd(-8, 8), y - rnd(10, 25), rnd(1.5, 2.5), 0x8a6538, 0.95);
+      chip.setDepth(VFX_DEPTHS.sparkle);
+      ignoreOnMinimap(scene, [chip]);
+      fadeOut(scene, chip, { duration: rnd(350, 550), x: chip.x + rnd(-24, 24), y: chip.y + rnd(6, 20) });
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+/**
+ * Chapoteo en orilla: anillo expansivo + 3 gotas (one-shot, ~0.5 s).
+ * Enganche: pescador al empezar a trabajar y barcos al botarse.
+ */
+export function splashPuff(scene: Phaser.Scene, x: number, y: number): void {
+  try {
+    const ring = scene.add.ellipse(x, y, 26, 10, 0xffffff, 0);
+    ring.setStrokeStyle(2, 0xbfe3ff, 0.9);
+    ring.setDepth(VFX_DEPTHS.sparkle);
+    ignoreOnMinimap(scene, [ring]);
+    fadeOut(scene, ring, { duration: 500, scaleX: 1.8, scaleY: 1.8 });
+    for (let i = 0; i < 3; i++) {
+      const drop = scene.add.circle(x + rnd(-8, 8), y + rnd(-4, 2), rnd(1.5, 2.5), 0xbfe3ff, 0.9);
+      drop.setDepth(VFX_DEPTHS.sparkle);
+      ignoreOnMinimap(scene, [drop]);
+      fadeOut(scene, drop, { duration: rnd(300, 450), y: drop.y - rnd(14, 26) });
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+/**
+ * Polvo leve de un paso (UN objeto, 0.4 s): arena y camino levantan polvo,
+ * la hierba no. Llamar con throttle (~1/s por caminante como máximo).
+ */
+export function stepPuff(scene: Phaser.Scene, x: number, y: number, color = 0xcbb58f): void {
+  try {
+    const mote = scene.add.circle(x + rnd(-4, 4), y + rnd(-3, 1), rnd(1.5, 2.5), color, 0.55);
+    mote.setDepth(VFX_DEPTHS.burst);
+    ignoreOnMinimap(scene, [mote]);
+    fadeOut(scene, mote, { duration: 400, x: mote.x + rnd(-12, 12), y: mote.y - rnd(8, 16) });
   } catch {
     /* noop */
   }

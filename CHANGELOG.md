@@ -2,6 +2,17 @@
 
 Todos los cambios documentados por checkpoint (tags `v*`).
 
+## [sin tag] — Transporte causal + terreno vivo (council Fase 1)
+- Buffers locales por edificio, cola con prioridades (comida primero) y ETA
+  por caminos; porteadores causales (1 ud. real), pilas físicas y avisos 🚚
+  de atasco; velocidad ×1/×2/×4; guardado v5 (ver
+  `docs/devlog/033-transporte-causal-terreno-vivo.md`).
+- Terreno vivo: arena/bosque frenan, camino compensa; leñador tala árboles
+  reales (rebrote 60-90 s) y sin bosque la cabaña no produce; pescador
+  chapotea; polvo de pasos; barra de obra.
+- Soporte: `roadDistance` BFS, A* con heap + caché LRU, `terrain.ts` puro.
+- Verificación: 151 unit, tsc limpio, build OK, lint sin errores nuevos.
+
 ## [sin tag] — Salto visual (3 subagentes + integración)
 - Terreno con relieve pictórico y agua con destellos/espuma
   (`fx/water.ts`); luz con faroles, luciérnagas y viñeta

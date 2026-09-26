@@ -50,6 +50,70 @@ export function tileCost(net: RoadNet, x: number, y: number): number {
   return hasRoad(net, x, y) ? ROAD_COST : OFFROAD_COST;
 }
 
+/** BFS sobre la red de caminos: ¿conectado y a qué distancia por carretera?
+ *  Council Fase 1: cortar un camino debe doler (ETA x2+2 campo a través).
+ *  Puro y acotado (maxVisit) para no congelar el tick con redes grandes. */
+export function roadDistance(
+  net: RoadNet,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+  maxVisit = 400,
+): { connected: boolean; distance: number } {
+  fromX = Math.round(fromX);
+  fromY = Math.round(fromY);
+  toX = Math.round(toX);
+  toY = Math.round(toY);
+  if (fromX === toX && fromY === toY) return { connected: true, distance: 0 };
+  const fromOnRoad = hasRoad(net, fromX, fromY);
+  const toOnRoad = hasRoad(net, toX, toY);
+  // Si ninguno pisa camino, es campo a través puro (distancia Manhattan).
+  if (!fromOnRoad && !toOnRoad) {
+    return { connected: false, distance: Math.abs(fromX - toX) + Math.abs(fromY - toY) };
+  }
+  // BFS desde el/los puntos de entrada a la red.
+  const start: { x: number; y: number }[] = [];
+  if (fromOnRoad) start.push({ x: fromX, y: fromY });
+  else {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      if (hasRoad(net, fromX + dx, fromY + dy)) start.push({ x: fromX + dx, y: fromY + dy });
+    }
+  }
+  if (!start.length) {
+    return { connected: false, distance: Math.abs(fromX - toX) + Math.abs(fromY - toY) + 2 };
+  }
+  const targetKeys = new Set<string>();
+  targetKeys.add(roadKey(toX, toY));
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    targetKeys.add(roadKey(toX + dx, toY + dy));
+  }
+  const seen = new Set<string>();
+  const queue: { x: number; y: number; d: number }[] = start.map((p) => ({ ...p, d: fromOnRoad ? 0 : 1 }));
+  for (const s of start) seen.add(roadKey(s.x, s.y));
+  let visited = 0;
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    if (++visited > maxVisit) break;
+    if (targetKeys.has(roadKey(cur.x, cur.y))) {
+      const tail = toOnRoad ? 0 : 1;
+      return { connected: true, distance: cur.d + tail };
+    }
+    for (const nb of roadNeighbors(net, cur.x, cur.y)) {
+      const k = roadKey(nb.x, nb.y);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      queue.push({ x: nb.x, y: nb.y, d: cur.d + 1 });
+    }
+  }
+  return { connected: false, distance: Math.abs(fromX - toX) + Math.abs(fromY - toY) + 4 };
+}
+
+/** ¿Hay ruta por carretera entre dos banderas? (atajo legible para la sim). */
+export function roadConnected(net: RoadNet, fromX: number, fromY: number, toX: number, toY: number): boolean {
+  return roadDistance(net, fromX, fromY, toX, toY).connected;
+}
+
 /** Serialización para guardado (array de "x,y"). */
 export function serializeRoads(net: RoadNet): string[] {
   return [...net];

@@ -3,20 +3,22 @@ import { playSfx } from '../audio';
 import { BUILDINGS, INITIAL_STOCK, RECIPES, type BuildingId, type ResourceId } from '../data/buildings';
 import { WL_BUILDINGS, WL_BUSHES, WL_CRITTERS, WL_GRASS, WL_RES_ICONS, WL_ROCKS, WL_SHIPS, WL_SHROOMS, WL_TREES, WL_WHEAT, WL_WHEAT_ORDER, WL_WORKERS, wlBuildingScale, wlWorkerScale } from '../data/wlArt';
 import { DAY_LENGTH_MS, skyAt } from '../systems/daynight';
-import { findPath, smoothPath, type GridPos } from '../systems/pathfinding';
+import { bumpPathCache, findPath, findPathCached, smoothPath, type GridPos } from '../systems/pathfinding';
 import { applyDamage, attackReach, recruitCost, soldierDps, towerDps, VICTORY_WAVES, waveSpec } from '../systems/combat';
 import { OBJECTIVES, isComplete } from '../systems/objectives';
-import { goodsFor, isNavigable, pickFishingCircuit, touchesWater } from '../systems/ships';
+import { isNavigable, pickFishingCircuit, touchesWater } from '../systems/ships';
 import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
-import { missingInputs, payCost, tickAutoProducers, tickJob, type ProductionJob, type Stock } from '../systems/economy';
+import { missingInputs, payCost, produceToBuffers, tickAutoProducers, tickJob, type ProductionJob, type Stock } from '../systems/economy';
 import { foodPerTick, growthPerTick, housingFor, moraleOf } from '../systems/population';
 import { findRivalBase, lateRivalBuild, nextRivalBuild, rivalStartingStock, RIVAL_ORDER, type Owner } from '../systems/rival';
-import { addRoad, createRoadNet, deserializeRoads, hasRoad, removeRoad, roadNeighbors, serializeRoads, tileCost, ROAD_SPEED_BONUS, type RoadNet } from '../systems/roads';
+import { addRoad, createRoadNet, deserializeRoads, hasRoad, removeRoad, roadDistance, roadNeighbors, serializeRoads, tileCost, ROAD_SPEED_BONUS, type RoadNet } from '../systems/roads';
+import { bufferTotal, congestedKeys, createTransportState, deserializeTransport, pickCarrierJob, requestShipments, serializeTransport, takeFromBuffer, tickQueue, type TransportState } from '../systems/transport';
 import { initWaterFX, updateWaterFX, LEGACY_WATER_BLINK_ENABLED, type WaterFX } from '../fx/water';
 import { initAtmosphere, updateSky, registerCloud } from '../fx/atmosphere';
 import { initCameraGrade, setNightGrade, attachBuildingShadow, selectGlow, discardSelectGlow, glowGhost } from '../fx/postfx';
 import { initWeather, stopWeather, registerWeatherCloud, type Weather } from '../fx/weather';
-import { dustBurst, builtBurst, hitFlash, recruitRing, harvestSparkle, smokeColumn } from '../fx/vfx';
+import { dustBurst, builtBurst, chopBurst, hitFlash, recruitRing, harvestSparkle, smokeColumn, splashPuff, stepPuff } from '../fx/vfx';
+import { hasLivingWood, nearestLivingWood, terrainSpeed, type NatureNode } from '../systems/terrain';
 import { computeEdges, placeEdges } from '../fx/edges';
 
 // Rama B: arte GPL de Widelands (ver docs/ATRIBUCION.md + wlArt.ts).
@@ -59,6 +61,8 @@ interface Walker {
   hp: number;
   maxHp: number;
   foe: Enemy | null;
+  /** Throttle de polvo de pasos (siguiente tiempo permitido, ms de escena). */
+  dustT: number;
 }
 
 interface Enemy {
@@ -112,6 +116,20 @@ export class GameScene extends Phaser.Scene {
   /** Avisos de producción bloqueada por edificio ("x,y" → recursos que faltan). */
   private stallInfo = new Map<string, ResourceId[]>();
   private stallMarks = new Map<string, Phaser.GameObjects.Text>();
+  // ---------- Transporte causal (council Fase 1: banderas + colas + ETA) ----------
+  // Los productores vierten a buffers locales; la cola mueve al almacén con
+  // retardo por distancia de caminos. Cortar = ETA x2+2 y atasco visible.
+  private transport: TransportState = createTransportState();
+  private pileMarks = new Map<string, Phaser.GameObjects.Text>();
+  private pileIcons = new Map<string, Phaser.GameObjects.Image>();
+  private buildBars = new Map<string, Phaser.GameObjects.Graphics>();
+  // ---------- Naturaleza viva: árboles talables y rocas (colono↔terreno) ----
+  // El leñador tala árboles reales; sin bosque vivo la cabaña no produce.
+  // Rebrotan en 60-90 s si la loseta sigue libre.
+  private treeNodes: (NatureNode & { spr?: Phaser.GameObjects.GameObject | null })[] = [];
+  private rockNodes: (NatureNode & { spr?: Phaser.GameObjects.GameObject | null })[] = [];
+  /** Velocidad de simulación x1/x2/x4 (ritmo web: S4 es lento, el navegador no). */
+  private gameSpeed = 1;
   // ---------- Población (Fase 3): techo real, comida, moral y crecimiento ----------
   private popCount = 20;
   private popProgress = 0;
@@ -555,16 +573,21 @@ export class GameScene extends Phaser.Scene {
       const ox = art.hotspot[0] / art.w;
       const oy = art.hotspot[1] / art.h;
       const tscale = 1.1 + n * 0.5;
+      let spr: Phaser.GameObjects.GameObject;
       if (art.sheet) {
         const tree = this.add.sprite(x + Phaser.Math.Between(-20, 20), y - 6, `wl-tree-${name}`, 0)
           .setOrigin(ox, oy).setDepth(depth).setScale(tscale);
         tree.play(`wl-tree-${name}`);
         if (n > 0.86) tree.setTint(0xddaa66); // ejemplar otoñal
+        spr = tree;
       } else {
         const tree = this.add.image(x + Phaser.Math.Between(-20, 20), y - 6, `wl-tree-${name}`)
           .setOrigin(ox, oy).setDepth(depth).setScale(tscale);
         if (n > 0.86) tree.setTint(0xddaa66);
+        spr = tree;
       }
+      // Nodo vivo: el leñador tala este sprite (rebrota si queda libre).
+      this.treeNodes.push({ tx, ty, alive: true, spr });
       if (n > 0.7 && shroomNames.length) {
         const sn = shroomNames[Math.floor(n * shroomNames.length) % shroomNames.length];
         const sa = WL_SHROOMS[sn];
@@ -575,9 +598,10 @@ export class GameScene extends Phaser.Scene {
     } else if (t === 'mountain' && n > 0.3 && rockNames.length) {
       const name = rockNames[Math.floor(n * rockNames.length) % rockNames.length];
       const art = WL_ROCKS[name];
-      this.add.image(x, y - 4, `wl-rock-${name}`)
+      const rock = this.add.image(x, y - 4, `wl-rock-${name}`)
         .setOrigin(art.hotspot[0] / art.w, art.hotspot[1] / art.h)
         .setDepth(depth).setScale(1.2 + n * 0.6);
+      this.rockNodes.push({ tx, ty, alive: true, spr: rock });
     } else if ((t === 'grass' || t === 'grassB' || t === 'grassC') && grassNames.length) {
       if (n > 0.82 && bushNames.length) {
         const name = bushNames[Math.floor(n * bushNames.length) % bushNames.length];
@@ -802,6 +826,7 @@ export class GameScene extends Phaser.Scene {
     if (hasRoad(this.roads, tx, ty) || !this.canRoad(tx, ty)) return false;
     const net = this.roads;
     addRoad(net, tx, ty);
+    bumpPathCache();
     this.renderRoadTile(tx, ty);
     for (const nb of roadNeighbors(net, tx, ty)) this.renderRoadTile(nb.x, nb.y);
     return true;
@@ -813,6 +838,7 @@ export class GameScene extends Phaser.Scene {
     ty = Math.round(ty);
     if (hasRoad(this.roads, tx, ty)) {
       removeRoad(this.roads, tx, ty);
+      bumpPathCache();
       this.roadDecals.get(`${tx},${ty}`)?.destroy();
       this.roadDecals.delete(`${tx},${ty}`);
       for (const nb of roadNeighbors(this.roads, tx, ty)) this.renderRoadTile(nb.x, nb.y);
@@ -1125,7 +1151,7 @@ export class GameScene extends Phaser.Scene {
       sprite, shadow, role, kind, faction, path: [], targetPx: null,
       speed: kind === 'critter' ? 55 : 68, state: 'idle', stateT: Math.random() * 1.5,
       onArrive: null, loaded: false, goods: null, goodsIcon: null,
-      hp: 30, maxHp: 30, foe: null,
+      hp: 30, maxHp: 30, foe: null, dustT: 0,
     };
     this.walkers.push(w);
     return w;
@@ -1135,9 +1161,11 @@ export class GameScene extends Phaser.Scene {
     const from = this.walkerTile(w);
     const allowWater = w.kind === 'critter' && w.role === 'duck';
     const blocked = (x: number, y: number) => this.tileBlocked(x, y, tx, ty, allowWater);
-    // Los colonos prefieren los caminos (A* ponderado); la fauna deambula libre.
+    // Los colonos prefieren los caminos (A* ponderado con heap + caché LRU);
+    // la fauna deambula libre.
     const costFn = w.kind === 'critter' ? undefined : (x: number, y: number) => tileCost(this.roads, x, y);
-    const raw = findPath(from, { x: tx, y: ty }, MAP, MAP, blocked, 4000, costFn);
+    const costTag = w.kind === 'critter' ? 'critter' : 'road';
+    const raw = findPathCached(from, { x: tx, y: ty }, MAP, MAP, blocked, 4000, costFn, costTag);
     if (!raw || raw.length < 2) {
       w.state = 'idle';
       w.stateT = 0.5 + Math.random();
@@ -1237,11 +1265,27 @@ export class GameScene extends Phaser.Scene {
       const dx = w.targetPx.x - s.x;
       const dy = w.targetPx.y - s.y;
       const dist = Math.hypot(dx, dy);
-      // Bonus de velocidad sobre caminos (los colonos vuelan por la red vial).
+      // Terreno: el camino anula la penalización; si no, la arena frena
+      // un poco y el bosque espeso frena mucho (colono↔terreno real).
       let step = w.speed * dt;
       if (w.kind === 'settler') {
         const t = this.groundLayer.worldToTileXY(s.x, s.y);
-        if (t && hasRoad(this.roads, t.x, t.y)) step *= ROAD_SPEED_BONUS;
+        if (t) {
+          if (hasRoad(this.roads, t.x, t.y)) {
+            step *= ROAD_SPEED_BONUS;
+          } else if (t.x >= 0 && t.y >= 0 && t.x < MAP && t.y < MAP) {
+            step *= terrainSpeed(terrainAt(Math.round(t.x), Math.round(t.y)));
+          }
+          // Polvo de pasos con throttle: arena/camino levantan polvo.
+          if (this.time.now >= (w.dustT ?? 0)) {
+            w.dustT = this.time.now + 900 + Math.random() * 600;
+            const onRoad = hasRoad(this.roads, Math.round(t.x), Math.round(t.y));
+            const terr = (t.x >= 0 && t.y >= 0 && t.x < MAP && t.y < MAP)
+              ? terrainAt(Math.round(t.x), Math.round(t.y))
+              : 'grass';
+            if (onRoad || terr === 'sand' || terr === 'dirt') stepPuff(this, s.x, s.y + 12);
+          }
+        }
       }
       if (dist <= Math.max(4, step)) {
         s.x = w.targetPx.x;
@@ -1456,7 +1500,7 @@ export class GameScene extends Phaser.Scene {
     const target = this.nearestBuilding(from.x, from.y);
     if (!target) { e.target = null; e.targetPx = null; return; }
     e.target = { x: target.tx, y: target.ty };
-    const raw = findPath(from, e.target, MAP, MAP, (x, y) => this.tileBlocked(x, y, e.target!.x, e.target!.y));
+    const raw = findPathCached(from, e.target, MAP, MAP, (x, y) => this.tileBlocked(x, y, e.target!.x, e.target!.y), 4000, () => 1, 'enemy');
     if (!raw || raw.length < 2) { e.targetPx = null; return; }
     e.path = smoothPath(raw, (x, y) => this.tileBlocked(x, y, e.target!.x, e.target!.y)).slice(1);
     const next = e.path.shift()!;
@@ -1679,7 +1723,7 @@ export class GameScene extends Phaser.Scene {
   private saveGame(silent = false): string | null {
     try {
       const data = {
-        v: 4,
+        v: 5,
         savedAt: Date.now(),
         stock: this.stock,
         aiStock: this.aiStock,
@@ -1690,6 +1734,8 @@ export class GameScene extends Phaser.Scene {
         kills: this.kills,
         wavesRepelled: this.wavesRepelled,
         doneObjectives: [...this.doneObjectives],
+        transport: serializeTransport(this.transport),
+        gameSpeed: this.gameSpeed,
       };
       window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
       if (!silent) playSfx('confirm');
@@ -1709,12 +1755,17 @@ export class GameScene extends Phaser.Scene {
         aiStock?: Stock;
         pop?: { count?: number; progress?: number; morale?: number };
         waveNo: number; kills: number; wavesRepelled?: number; doneObjectives?: string[];
+        transport?: unknown;
+        gameSpeed?: number;
       };
       if (!data || !Array.isArray(data.placed)) return false;
       // limpiar mundo
       for (const p of this.placed) p.sprite.destroy();
       for (const d of this.roadDecals.values()) d.destroy();
       for (const m of this.stallMarks.values()) m.destroy();
+      for (const m of this.pileMarks.values()) m.destroy();
+      for (const m of this.pileIcons.values()) m.destroy();
+      for (const m of this.buildBars.values()) m.destroy();
       for (const w of this.walkers) {
         w.sprite.destroy();
         w.shadow.destroy();
@@ -1739,7 +1790,11 @@ export class GameScene extends Phaser.Scene {
       this.buildingTiles.clear();
       this.roadDecals.clear();
       this.stallMarks.clear();
+      this.pileMarks.clear();
+      this.pileIcons.clear();
+      this.buildBars.clear();
       this.stallInfo.clear();
+      this.transport = createTransportState();
       this.jobs = [];
       this.territoryRadius = 7;
       // restaurar
@@ -1751,6 +1806,9 @@ export class GameScene extends Phaser.Scene {
       this.popProgress = data.pop?.progress ?? 0;
       this.morale = data.pop?.morale ?? 80;
       this.foodAcc = 0;
+      this.transport = deserializeTransport((data as { transport?: unknown }).transport);
+      if (data.gameSpeed === 2 || data.gameSpeed === 4) this.gameSpeed = data.gameSpeed;
+      else this.gameSpeed = 1;
       this.roads = deserializeRoads(data.roads);
       for (const k of this.roads) {
         if (this.buildingTiles.has(k)) {
@@ -1817,6 +1875,15 @@ export class GameScene extends Phaser.Scene {
     this.stallMarks.get(`${tx},${ty}`)?.destroy();
     this.stallMarks.delete(`${tx},${ty}`);
     this.stallInfo.delete(`${tx},${ty}`);
+    this.pileMarks.get(`${tx},${ty}`)?.destroy();
+    this.pileMarks.delete(`${tx},${ty}`);
+    this.pileIcons.get(`${tx},${ty}`)?.destroy();
+    this.pileIcons.delete(`${tx},${ty}`);
+    this.buildBars.get(`${tx},${ty}`)?.destroy();
+    this.buildBars.delete(`${tx},${ty}`);
+    delete this.transport.buffers[`${tx},${ty}`];
+    this.transport.queue = this.transport.queue.filter((l) => l.fromKey !== `${tx},${ty}`);
+    bumpPathCache();
     this.jobs = this.jobs.filter((j) => j.key !== `${tx},${ty}`);
     // trigales huérfanos de una granja caída
     if (p.id === 'granja') {
@@ -1933,13 +2000,18 @@ export class GameScene extends Phaser.Scene {
     };
     switch (role) {
       case 'woodcutter': {
+        // Interacción real: va al árbol vivo más cercano a la cabaña y lo
+        // tala al terminar (sin bosque vivo, deambula: la cabaña no produce).
         if (!cabana) { this.stroll(w); break; }
-        const t = near(this.forestTiles, 12);
-        if (!t) { this.stroll(w); break; }
-        if (!this.sendWalker(w, t.x, t.y, () => {
+        const tree = nearestLivingWood(this.treeNodes, cabana.tx, cabana.ty, 12);
+        if (!tree) { this.stroll(w); break; }
+        if (!this.sendWalker(w, tree.tx, tree.ty, () => {
           w.state = 'work';
           w.stateT = 3.5 + Math.random() * 1.5;
-          w.onArrive = () => this.sendWalker(w, cabana.tx, cabana.ty, () => this.assignJob(w));
+          w.onArrive = () => {
+            this.chopNearestTree(tree.tx, tree.ty);
+            this.sendWalker(w, cabana.tx, cabana.ty, () => this.assignJob(w));
+          };
           if (this.playWork(w)) {
             this.time.delayedCall(900, () => playSfx('chop'));
             this.time.delayedCall(2400, () => playSfx('chop'));
@@ -1963,18 +2035,32 @@ export class GameScene extends Phaser.Scene {
           w.state = 'work'; w.stateT = 4 + Math.random() * 3;
           w.onArrive = () => this.assignJob(w);
           this.playWork(w);
+          // Chapoteo al echar la caña (colono↔agua).
+          const { x: fx, y: fy } = this.iso(t.x, t.y);
+          splashPuff(this, fx, fy - 6);
+          playSfx('splash');
         })) this.stroll(w);
         break;
       }
       case 'carrier': {
-        if (this.placed.length < 2 || !almacen) { this.stroll(w); break; }
-        const b = this.placed[Phaser.Math.Between(1, this.placed.length - 1)];
+        // Council Fase 1: porteador causal — recoge del buffer más prioritario
+        // (comida primero) y entrega 1 unidad real al almacén. Sin buffer no
+        // hay paseo fake: patrulla corta hasta que haya carga.
+        if (!almacen) { this.stroll(w); break; }
+        const centralKey = `${almacen.tx},${almacen.ty}`;
+        const job = pickCarrierJob(this.transport, centralKey);
+        if (!job) { this.stroll(w); break; }
+        const [jx, jy] = job.fromKey.split(',').map(Number);
         w.loaded = false;
         this.setGoods(w, null);
-        if (!this.sendWalker(w, b.tx, b.ty, () => {
-          w.loaded = true; // carga mercancía del edificio y vuelve al almacén
-          this.setGoods(w, goodsFor(b.id));
+        if (!this.sendWalker(w, jx, jy, () => {
+          const got = takeFromBuffer(this.transport, job.fromKey, job.resource, 1);
+          if (got <= 0) { this.assignJob(w); return; }
+          w.loaded = true;
+          this.setGoods(w, job.resource);
           this.sendWalker(w, almacen.tx, almacen.ty, () => {
+            this.stock[job.resource] = (this.stock[job.resource] ?? 0) + got;
+            this.updateHud();
             w.loaded = false;
             this.setGoods(w, null);
             this.assignJob(w);
@@ -2014,6 +2100,56 @@ export class GameScene extends Phaser.Scene {
     const nx = Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-6, 6)), 2, MAP - 3);
     const ny = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-6, 6)), 2, MAP - 3);
     if (!this.sendWalker(w, nx, ny)) this.rest(w, 1 + Math.random() * 2);
+  }
+
+  /**
+   * Tala el árbol vivo de (tx,ty): hojas + tocón + rebrote en 60-90 s.
+   * Si la loseta queda ocupada o deja de ser bosque, no rebrota.
+   */
+  private chopNearestTree(tx: number, ty: number) {
+    const node = this.treeNodes.find((n) => n.alive && n.tx === tx && n.ty === ty)
+      ?? this.treeNodes.find((n) => n.alive && Math.abs(n.tx - tx) + Math.abs(n.ty - ty) <= 1);
+    if (!node) return;
+    node.alive = false;
+    const { x, y } = this.iso(node.tx, node.ty);
+    chopBurst(this, x, y - 10);
+    try {
+      const spr = node.spr as Phaser.GameObjects.Sprite | Phaser.GameObjects.Image | null | undefined;
+      if (spr && (spr as Phaser.GameObjects.Image).active !== false) {
+        this.tweens.add({ targets: spr, alpha: 0, scale: 0.1, duration: 400, onComplete: () => { try { spr.destroy(); } catch { /* noop */ } } });
+      }
+    } catch { /* visual: nunca rompe la sim */ }
+    node.spr = null;
+    // Tocón testimonial que se retira al rebrotar.
+    let stump: Phaser.GameObjects.Image | null = null;
+    try {
+      stump = this.add.image(x, y - 2, 'stump').setDepth(101).setScale(1.2);
+    } catch { /* noop */ }
+    this.time.delayedCall(Phaser.Math.Between(60000, 90000), () => {
+      try { stump?.destroy(); } catch { /* noop */ }
+      if (this.buildingTiles.has(`${node.tx},${node.ty}`)) return;
+      if (terrainAt(node.tx, node.ty) !== 'forest') return;
+      const { x: rx, y: ry } = this.iso(node.tx, node.ty);
+      const depth = 100 + node.ty * MAP + node.tx + 0.5;
+      const names = Object.keys(WL_TREES);
+      const name = names.length ? names[Phaser.Math.Between(0, names.length - 1)] : null;
+      if (!name) { node.alive = true; node.spr = null; return; }
+      const art = WL_TREES[name];
+      let spr: Phaser.GameObjects.GameObject;
+      if (art.sheet) {
+        const t = this.add.sprite(rx, ry - 6, `wl-tree-${name}`, 0)
+          .setOrigin(art.hotspot[0] / art.w, art.hotspot[1] / art.h).setDepth(depth).setScale(0.1);
+        t.play(`wl-tree-${name}`);
+        this.tweens.add({ targets: t, scale: 1.3, duration: 1200, ease: 'Back.easeOut' });
+        spr = t;
+      } else {
+        spr = this.add.image(rx, ry - 6, `wl-tree-${name}`)
+          .setOrigin(art.hotspot[0] / art.w, art.hotspot[1] / art.h).setDepth(depth).setScale(1.3);
+      }
+      node.alive = true;
+      node.spr = spr;
+      this.forestTiles.push({ x: node.tx, y: node.ty });
+    });
   }
 
   /** Coloca lo que el diseñador marcó en Tiled (capa Logica). */
@@ -2184,10 +2320,35 @@ export class GameScene extends Phaser.Scene {
     c.add(worker);
     this.tweens.add({ targets: worker, y: -16, duration: 380, yoyo: true, repeat: 8 });
     if (owner === 'player') this.drawPath(x, y, depth - 1);
+    // Barra de obra + polvo de construcción (el edificio "crece" de verdad).
+    const bkey = `${tx},${ty}`;
+    const bar = this.add.graphics().setDepth(depth + 3);
+    bar.fillStyle(0x000000, 0.65);
+    bar.fillRect(x - 30, y - 96, 60, 7);
+    bar.fillStyle(0xfbbf24, 1);
+    bar.fillRect(x - 29, y - 95, 1, 5);
+    this.buildBars.set(bkey, bar);
+    const buildMs = Math.min(def.tiempoConstruccionMs, 4000);
+    const barState = { t: 0 };
     this.tweens.add({
-      targets: buildFx ? [buildFx] : [], alpha: 0, duration: Math.min(def.tiempoConstruccionMs, 4000),
+      targets: barState, t: 1, duration: buildMs,
+      onUpdate: () => {
+        bar.clear();
+        bar.fillStyle(0x000000, 0.65);
+        bar.fillRect(x - 30, y - 96, 60, 7);
+        bar.fillStyle(0xfbbf24, 1);
+        bar.fillRect(x - 29, y - 95, 58 * Math.min(1, barState.t), 5);
+      },
+    });
+    // Polvo de obra a mitad y al final (2 puffs acotados).
+    this.time.delayedCall(buildMs / 2, () => stepPuff(this, x - 10, y - 4));
+    this.tweens.add({
+      targets: buildFx ? [buildFx] : [], alpha: 0, duration: buildMs,
       onComplete: () => {
         buildFx?.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, scale);
+        this.buildBars.get(bkey)?.destroy();
+        this.buildBars.delete(bkey);
+        stepPuff(this, x + 8, y - 4);
         playSfx('built');
         builtBurst(this, x, y);
         if (id === 'puerto') this.spawnShip(tx, ty);
@@ -2195,6 +2356,7 @@ export class GameScene extends Phaser.Scene {
     });
     this.placed.push({ id, tx, ty, sprite: c, done: 0, total: def.tiempoConstruccionMs, owner });
     this.buildingTiles.add(`${tx},${ty}`);
+    bumpPathCache();
     if (WL_SMOKE.has(id)) this.addSmoke(x, y - art.h * scale * 0.85, depth + 1);
     else if (WL_SMOKE_SOFT.has(id)) this.addSmoke(x, y - art.h * scale * 0.85, depth + 1, 1700, 0.7);
     if (id === 'granja' && owner === 'player') this.plantWheat(x, y, depth);
@@ -2317,7 +2479,39 @@ export class GameScene extends Phaser.Scene {
 
   private tickEconomy() {
     this.econTickNo++;
-    this.stock = tickAutoProducers(this.stock, this.placed.filter((p) => p.owner !== 'rival').map((p) => p.id), this.econTickNo);
+    // Council Fase 1: materias primas a buffers locales + cola con ETA por
+    // caminos (no teletransporte). El rival mantiene stock global por perf
+    // con idénticas reglas de producción (deuda documentada).
+    const playerPlaced = this.placed.filter((p) => p.owner !== 'rival');
+    // Interacción terreno: cada cabaña necesita bosque vivo en radio 6;
+    // sin árboles no hay madera (el leñador la tala de verdad, ver chop).
+    const placements = playerPlaced
+      .filter((p) => {
+        if (p.id !== 'cabanaLenador') return true;
+        return hasLivingWood(this.treeNodes, p.tx, p.ty, 6);
+      })
+      .map((p) => ({ id: p.id, key: `${p.tx},${p.ty}` }));
+    const prod = produceToBuffers(this.transport.buffers, placements, this.stock, this.econTickNo);
+    this.stock = prod.central;
+    const almacen = playerPlaced.find((p) => p.id === 'almacen');
+    const cx = almacen?.tx ?? this.center.x;
+    const cy = almacen?.ty ?? this.center.y;
+    const centralKey = `${cx},${cy}`;
+    const carriers = this.walkers.filter((w) => w.kind === 'settler' && w.faction === 'player' && w.role === 'carrier' && w.sprite.active).length;
+    const bandwidth = 4 + carriers * 2;
+    requestShipments(this.transport, {
+      bandwidth,
+      centralKey,
+      distanceOf: (fromKey: string) => {
+        const [fx, fy] = fromKey.split(',').map(Number);
+        return roadDistance(this.roads, fx, fy, cx, cy);
+      },
+    });
+    const flow = tickQueue(this.transport);
+    for (const [k, v] of Object.entries(flow.deliveries)) {
+      this.stock[k as ResourceId] = (this.stock[k as ResourceId] ?? 0) + (v ?? 0);
+    }
+    this.refreshPiles();
     this.aiStock = tickAutoProducers(this.aiStock, this.placed.filter((p) => p.owner === 'rival').map((p) => p.id), this.econTickNo);
     const recipeByBuilding: Partial<Record<BuildingId, string>> = RECIPE_BY_BUILDING;
     for (const p of this.placed) {
@@ -2373,6 +2567,61 @@ export class GameScene extends Phaser.Scene {
     } else if (this.popProgress <= -1) {
       this.popProgress = 0;
       this.emigrateOne();
+    }
+  }
+
+  /** Pilas de mercancía delante del edificio (buffer local real, no decorado). */
+  /** Icono físico de la pila según el recurso dominante (props existentes). */
+  private pileIconFor(buf: Partial<Record<ResourceId, number>>): string | null {
+    let best: ResourceId | null = null;
+    let bestN = 0;
+    for (const [k, v] of Object.entries(buf)) {
+      if ((v ?? 0) > bestN) { bestN = v ?? 0; best = k as ResourceId; }
+    }
+    if (!best) return null;
+    if (best === 'madera' || best === 'tablon') return 'logs';
+    if (best === 'piedra' || best === 'carbon' || best === 'hierro' || best === 'oro') return 'stones';
+    if (best === 'grano' || best === 'harina') return 'tuft';
+    return 'crates';
+  }
+
+  private refreshPiles() {
+    const seen = new Set<string>();
+    for (const [k, buf] of Object.entries(this.transport.buffers)) {
+      const total = bufferTotal(buf);
+      if (total <= 0) continue;
+      seen.add(k);
+      const [tx, ty] = k.split(',').map(Number);
+      const { x, y } = this.iso(tx, ty);
+      const label = `📦${total}`;
+      const mark = this.pileMarks.get(k);
+      if (mark) {
+        if (mark.text !== label) mark.setText(label);
+      } else {
+        const t = this.add.text(x - 34, y - 44, label, { fontSize: '12px', color: '#fde68a', backgroundColor: '#00000088', padding: { x: 4, y: 2 } })
+          .setOrigin(0.5).setDepth(8600);
+        this.pileMarks.set(k, t);
+      }
+      // Cajón/troncos/piedra junto a la etiqueta (montón físico S4).
+      const wantIcon = this.pileIconFor(buf);
+      const curIcon = this.pileIcons.get(k);
+      if (wantIcon && !curIcon) {
+        try {
+          const img = this.add.image(x - 58, y - 18, wantIcon).setDepth(8599).setScale(0.8);
+          this.pileIcons.set(k, img);
+        } catch { /* textura ausente: solo texto */ }
+      } else if (!wantIcon && curIcon) {
+        curIcon.destroy();
+        this.pileIcons.delete(k);
+      }
+    }
+    for (const [k, mark] of [...this.pileMarks]) {
+      if (!seen.has(k)) {
+        mark.destroy();
+        this.pileMarks.delete(k);
+        this.pileIcons.get(k)?.destroy();
+        this.pileIcons.delete(k);
+      }
     }
   }
 
@@ -2635,6 +2884,9 @@ export class GameScene extends Phaser.Scene {
         focus: (tx: number, ty: number) => void;
         pop: () => { pop: number; cap: number; morale: number; eating: number };
         stalls: () => { id: BuildingId; nombre: string; tx: number; ty: number; faltan: string[] }[];
+        transport: () => { waiting: number; inTransit: number; congested: number };
+        speed: () => number;
+        setSpeed: (s: number) => void;
         stock: () => Stock;
         counts: () => number;
         recruit: () => boolean;
@@ -2683,7 +2935,24 @@ export class GameScene extends Phaser.Scene {
           const faltan = this.stallInfo.get(`${p.tx},${p.ty}`);
           if (faltan) out.push({ id: p.id, nombre: BUILDINGS[p.id].nombre, tx: p.tx, ty: p.ty, faltan: [...faltan] });
         }
+        // Council Fase 1: atascos de transporte (pila llena) como avisos 🚚.
+        for (const k of congestedKeys(this.transport, 6)) {
+          const [tx, ty] = k.split(',').map(Number);
+          const p = this.placed.find((q) => q.tx === tx && q.ty === ty);
+          if (!p || out.some((o) => o.tx === tx && o.ty === ty)) continue;
+          const total = bufferTotal(this.transport.buffers[k]);
+          out.push({ id: p.id, nombre: BUILDINGS[p.id].nombre, tx, ty, faltan: [`🚚 atasco (${total} en pila)`] });
+        }
         return out;
+      },
+      transport: () => ({
+        waiting: Object.values(this.transport.buffers).reduce((a, b) => a + bufferTotal(b), 0),
+        inTransit: this.transport.queue.reduce((a, l) => a + l.amount, 0),
+        congested: congestedKeys(this.transport, 6).length,
+      }),
+      speed: () => this.gameSpeed,
+      setSpeed: (s: number) => {
+        this.gameSpeed = s === 4 ? 4 : s === 2 ? 2 : 1;
       },
       stock: () => ({ ...this.stock }),
       counts: () => this.placed.length,
@@ -2760,17 +3029,19 @@ export class GameScene extends Phaser.Scene {
   override update(_time: number, delta: number) {
     const cam = this.cameras.main;
     const dt = Math.min(delta, 100) / 1000;
-    // --- Economía a 1 tick/s de pared, independiente de los FPS.
+    // --- Economía a 1 tick/s de pared x velocidad (council: ritmo web x1/x2/x4).
     const wallNow = performance.now();
     if (this.econLast > 0) {
       this.econAcc += Math.min(wallNow - this.econLast, 250);
+      const interval = 1000 / this.gameSpeed;
       let n = 0;
-      while (this.econAcc >= 1000 && n < 3) {
+      const maxTicks = 3 * this.gameSpeed;
+      while (this.econAcc >= interval && n < maxTicks) {
         this.tickEconomy();
-        this.econAcc -= 1000;
+        this.econAcc -= interval;
         n++;
       }
-      if (n === 3) this.econAcc = 0;
+      if (n === maxTicks) this.econAcc = 0;
     }
     this.econLast = wallNow;
     // --- Cámara suave: velocidad con inercia + edge scrolling + zoom interpolado.
