@@ -18,3 +18,8 @@
 
 ## Siguiente paso
 - Gating cantera↔rocas, humo solo produciendo, niebla que bloquee construcción.
+
+## Deploy (2026-09-27 ~01:19 CEST)
+- Vercel ignora pushes a `proto-b-widelands` (cero check-runs); solo `master` dispara build. Flujo: trabajar en proto-b, merge --ff a master para publicar.
+- Publicación: merge f72a958 a master + push → `dpl_3doLLYjKrG9D3pqc9zyFAhUMopcn` Ready en `spanish-settlers-b` (alias `spanish-settlers-b.vercel.app`).
+- Cuentas: solo dilesz (GitHub + Vercel). Sesión CLI de cuentadanielsonyia cerrada; proyecto preview huérfano `spanish-settlers-preview` eliminado.
