@@ -2,6 +2,12 @@
 
 Todos los cambios documentados por checkpoint (tags `v*`).
 
+## [sin tag] — Misiones abajo, sin categorías, isla 64
+- Misiones a ancho completo bajo el mapa; BuildMenu en lista única sin
+  pestañas; isla 64x64 con cámara, minimapa, A* y rival proporcionales.
+- Ver `docs/devlog/038-lateral-sincat-isla64.md`.
+- Verificación: 161 unit, tsc limpio, build OK, e2e 2/2, lint sin nuevos.
+
 ## [sin tag] — Lateral, mapa grande y órdenes directas
 - Construcción en el lateral (xl), mapa 40x40 con cámara/minimapa/rival
   proporcionales, órdenes clic-a-colono y patrullas punto a punto.

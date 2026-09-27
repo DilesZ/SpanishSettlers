@@ -2,7 +2,7 @@
 // El test tests/unit/tilemap.test.ts regenera con esto y lo compara con
 // public/assets/maps/isla-01.json para garantizar que están sincronizados.
 
-export const ISLAND_SIZE = 40;
+export const ISLAND_SIZE = 64;
 export const TILE_W = 132;
 export const TILE_H = 66;
 

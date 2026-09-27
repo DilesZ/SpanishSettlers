@@ -82,7 +82,8 @@ export function serializeFog(fog: FogGrid): number[] {
 
 export function deserializeFog(data: unknown, size: number): FogGrid {
   const fog = createFog(size);
-  if (!Array.isArray(data)) return fog;
+  // Rejilla de otro tamaño (isla crecida) = niebla nueva, no calco movido.
+  if (!Array.isArray(data) || data.length !== size * size) return fog;
   const n = Math.min(data.length, fog.length);
   for (let i = 0; i < n; i++) {
     const v = data[i];

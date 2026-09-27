@@ -237,9 +237,8 @@ export default function PlayPage() {
             )}
           </div>
 
-          {/* Columna lateral: estado + ayuda */}
+          {/* Columna lateral: ayuda (las misiones van bajo el mapa) */}
           <aside className="order-3 min-w-0 space-y-3">
-            <ColonyPanel objectives={objectives} pop={pop} stalls={stalls} stock={stock} />
             <section aria-label="Ayuda rápida" className="rounded-2xl border border-amber-200/15 bg-[#101a12]/95 p-4 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]">
               <h2 className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-200/90">
                 🧭 Guía del colono
@@ -255,6 +254,11 @@ export default function PlayPage() {
               </ol>
             </section>
           </aside>
+        </div>
+
+        {/* Misiones y estado bajo el mapa (ancho completo) */}
+        <div className="mt-3">
+          <ColonyPanel objectives={objectives} pop={pop} stalls={stalls} stock={stock} />
         </div>
 
         <footer className="mt-4 text-center text-[11px] leading-5 text-amber-100/45">

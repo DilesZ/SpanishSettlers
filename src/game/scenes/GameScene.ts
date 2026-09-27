@@ -713,8 +713,8 @@ export class GameScene extends Phaser.Scene {
     });
     this.input.on('pointerup', () => { dragging = false; });
     this.input.mouse?.disableContextMenu();
-    // Isla 40 (iso 132x66): x ±2574, y 0..2574 + margen.
-    this.cameras.main.setBounds(-3000, -800, 6000, 4200);
+    // Isla 64 (iso 132x66): x ±4158, y 0..4158 + margen.
+    this.cameras.main.setBounds(-4600, -1200, 9200, 6400);
 
     // La barra de recursos vive en React (/play). En Phaser solo avisos.
     this.hintText = this.add.text(12, 12, '', { fontSize: '13px', color: '#fde68a', backgroundColor: '#000000aa', padding: { x: 10, y: 7 } })
@@ -1196,8 +1196,8 @@ export class GameScene extends Phaser.Scene {
     // la fauna deambula libre.
     const costFn = w.kind === 'critter' ? undefined : (x: number, y: number) => tileCost(this.roads, x, y);
     const costTag = w.kind === 'critter' ? 'critter' : 'road';
-    // Isla grande: más margen de iteraciones (el heap lo hace barato).
-    const raw = findPathCached(from, { x: tx, y: ty }, MAP, MAP, blocked, 8000, costFn, costTag);
+    // Isla 64: más margen de iteraciones (el heap lo hace barato).
+    const raw = findPathCached(from, { x: tx, y: ty }, MAP, MAP, blocked, 12000, costFn, costTag);
     if (!raw || raw.length < 2) {
       w.state = 'idle';
       w.stateT = 0.5 + Math.random();

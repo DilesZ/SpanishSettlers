@@ -2,16 +2,13 @@
 // Presentacional: filtra ORDER por categoría y llama a onBuild/onRoad.
 // El botón Camino se renderiza siempre, haya o no selección.
 
-import { useState } from 'react';
 import { BUILDINGS, type BuildingId, type ResourceId } from '@/game/data/buildings';
 import {
-  CATEGORIES,
   ORDER,
   iconFallback,
   iconFor,
   onImgFallback,
   resIconFor,
-  type CategoryId,
 } from './hud-icons';
 
 interface BuildMenuProps {
@@ -26,12 +23,8 @@ interface BuildMenuProps {
 }
 
 export function BuildMenu({ selected, roadMode, rival, stock, questTarget, onBuild, onRoad }: BuildMenuProps) {
-  const [tab, setTab] = useState<CategoryId>('todos');
-
-  const countFor = (c: CategoryId) =>
-    c === 'todos' ? ORDER.length : ORDER.filter((id) => BUILDINGS[id].categoria === c).length;
-  const visibleTabs = CATEGORIES.filter((c) => countFor(c.id) > 0);
-  const ids = tab === 'todos' ? ORDER : ORDER.filter((id) => BUILDINGS[id].categoria === tab);
+  // Sin categorías: todos los edificios en una sola lista (ORDER define el orden).
+  const ids = ORDER;
 
   const hint = selected
     ? `→ ${BUILDINGS[selected].nombre} (clic en una loseta)`
@@ -68,37 +61,7 @@ export function BuildMenu({ selected, roadMode, rival, stock, questTarget, onBui
         </button>
       </div>
 
-      {/* Pestañas por categoría */}
-      <div role="tablist" aria-label="Categorías de edificios" className="flex gap-1.5 overflow-x-auto px-3 pt-2.5 md:px-4">
-        {visibleTabs.map((c) => {
-          const active = tab === c.id;
-          return (
-            <button
-              key={c.id}
-              role="tab"
-              aria-selected={active}
-              onClick={() => setTab(c.id)}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold whitespace-nowrap transition ${
-                active
-                  ? 'border-amber-300/70 bg-amber-300/15 text-amber-100'
-                  : 'border-white/10 bg-white/[0.04] text-amber-100/70 hover:border-amber-200/30 hover:text-amber-50'
-              }`}
-            >
-              <span aria-hidden>{c.glyph}</span>
-              {c.label}
-              <span
-                className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
-                  active ? 'bg-amber-300/25 text-amber-100' : 'bg-black/40 text-amber-100/60'
-                }`}
-              >
-                {countFor(c.id)}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Tarjetas (en el lateral xl: una columna) */}
+      {/* Tarjetas: lista única (en el lateral xl: una columna) */}
       <div className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3 md:p-4 xl:grid-cols-1">
         {ids.map((id) => {
           const def = BUILDINGS[id];

@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SIZE = 40;
+const SIZE = 64;
 const TW = 132;
 const TH = 66;
 
