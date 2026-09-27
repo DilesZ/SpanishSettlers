@@ -2,7 +2,7 @@
 // El test tests/unit/tilemap.test.ts regenera con esto y lo compara con
 // public/assets/maps/isla-01.json para garantizar que están sincronizados.
 
-export const ISLAND_SIZE = 28;
+export const ISLAND_SIZE = 40;
 export const TILE_W = 132;
 export const TILE_H = 66;
 
@@ -22,8 +22,9 @@ export function hash(x: number, y: number): number {
 export function terrainAt(tx: number, ty: number): TerrainKey {
   const d = Math.hypot(tx - ISLAND_SIZE / 2, ty - ISLAND_SIZE / 2);
   const n = hash(tx, ty);
-  if (d > 12.5) return (['water', 'waterB', 'waterC'] as const)[Math.floor(hash(tx * 5, ty * 3) * 3)];
-  if (d > 11.2) return 'sand';
+  // Umbrales proporcionales al tamaño (12.5/28 y 11.2/28 originales).
+  if (d > ISLAND_SIZE * 0.4464) return (['water', 'waterB', 'waterC'] as const)[Math.floor(hash(tx * 5, ty * 3) * 3)];
+  if (d > ISLAND_SIZE * 0.4) return 'sand';
   if (n > 0.9) return 'mountain';
   if (n > 0.72) return 'forest';
   if (n > 0.66) return 'dirt';

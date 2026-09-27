@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { heightAt, HEIGHT_SCALE, slopeAt, smoothHeightAt, tileToWorld, waterLevel } from '@/three/height';
+import { ISLAND_SIZE } from '@/game/maps/island';
+
+// Coordenadas derivadas del tamaño (la isla creció de 28 a 40: nada fijo).
+const C = Math.floor(ISLAND_SIZE / 2);
 
 describe('heightfield', () => {
   it('agua bajo el nivel del mar y tierra alta en el centro', () => {
     expect(heightAt(0, 0)).toBeLessThan(waterLevel());
-    expect(heightAt(14, 14)).toBeGreaterThan(0.2);
+    expect(heightAt(C, C)).toBeGreaterThan(0.2);
   });
 
   it('es determinista', () => {
@@ -12,21 +16,21 @@ describe('heightfield', () => {
   });
 
   it('tileToWorld centra la loseta y asienta en su altura', () => {
-    const p = tileToWorld(14, 14);
-    expect(p.y).toBeCloseTo(heightAt(14, 14) * HEIGHT_SCALE, 6);
+    const p = tileToWorld(C, C);
+    expect(p.y).toBeCloseTo(heightAt(C, C) * HEIGHT_SCALE, 6);
   });
 
   it('smoothHeightAt coincide en enteros y suaviza entre ellos', () => {
-    expect(smoothHeightAt(14, 14)).toBeCloseTo(heightAt(14, 14), 6);
-    const a = smoothHeightAt(14.5, 14);
-    const lo = Math.min(heightAt(14, 14), heightAt(15, 14));
-    const hi = Math.max(heightAt(14, 14), heightAt(15, 14));
+    expect(smoothHeightAt(C, C)).toBeCloseTo(heightAt(C, C), 6);
+    const a = smoothHeightAt(C + 0.5, C);
+    const lo = Math.min(heightAt(C, C), heightAt(C + 1, C));
+    const hi = Math.max(heightAt(C, C), heightAt(C + 1, C));
     expect(a).toBeGreaterThanOrEqual(lo);
     expect(a).toBeLessThanOrEqual(hi);
   });
 
   it('slopeAt es cero en llano y positivo en pendiente', () => {
-    expect(slopeAt(14, 14)).toBeGreaterThanOrEqual(0);
-    expect(slopeAt(14, 14)).toBeLessThan(0.2);
+    expect(slopeAt(C, C)).toBeGreaterThanOrEqual(0);
+    expect(slopeAt(C, C)).toBeLessThan(0.2);
   });
 });

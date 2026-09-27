@@ -2,6 +2,12 @@
 
 Todos los cambios documentados por checkpoint (tags `v*`).
 
+## [sin tag] — Lateral, mapa grande y órdenes directas
+- Construcción en el lateral (xl), mapa 40x40 con cámara/minimapa/rival
+  proporcionales, órdenes clic-a-colono y patrullas punto a punto.
+- Ver `docs/devlog/037-lateral-mapa-ordenes.md`.
+- Verificación: 161 unit, tsc limpio, build OK, e2e 2/2, lint sin nuevos.
+
 ## [sin tag] — Root R1: escasez + deadline + quest + juice
 - Minas con veta finita (30) y aviso ⛏ de agotada; guardado v7.
 - Reloj de asedio visible (cuenta atrás + oleada x/10) y quest de 3 pasos

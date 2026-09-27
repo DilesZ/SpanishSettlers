@@ -193,9 +193,21 @@ export default function PlayPage() {
         <QuestTracker quest={quest} />
         <SiegeBar siege={siege} />
 
-        <div className="mt-3 grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="mt-3 grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[300px_minmax(0,1fr)_340px]">
+          {/* Construcción: lateral en xl (una sola instancia, compacta por CSS) */}
+          <aside aria-label="Construcción" className="order-2 min-w-0 lg:col-span-2 xl:order-1 xl:col-span-1">
+            <BuildMenu
+              selected={selected}
+              roadMode={roadMode}
+              rival={rival}
+              stock={stock}
+              questTarget={quest && !quest.complete ? (quest as QuestInfo & { target: BuildingId | null }).target : null}
+              onBuild={build}
+              onRoad={startRoad}
+            />
+          </aside>
           {/* Columna principal: mapa + inspección */}
-          <div className="min-w-0 space-y-3">
+          <div className="order-1 min-w-0 space-y-3 xl:order-2">
             <section aria-label="Mapa de la colonia" className="overflow-hidden rounded-2xl border border-amber-200/15 bg-[#0d1f16] shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-white/[0.07] bg-white/[0.03] px-3 py-2 md:px-4">
                 <span aria-hidden className="flex gap-1.5">
@@ -207,7 +219,7 @@ export default function PlayPage() {
                   🗺 Isla principal
                 </p>
                 <p className="ml-auto hidden text-[11px] text-amber-100/55 sm:block">
-                  Arrastra para mover · Rueda para zoom · Clic en edificio = info
+                  Arrastra para mover · Rueda para zoom · Clic en edificio = info · Clic en colono = ordenar
                 </p>
                 {(selected || roadMode) && (
                   <p role="status" className="rounded-full border border-amber-300/40 bg-amber-300/10 px-2.5 py-0.5 text-[11px] font-bold text-amber-100">
@@ -226,7 +238,7 @@ export default function PlayPage() {
           </div>
 
           {/* Columna lateral: estado + ayuda */}
-          <aside className="min-w-0 space-y-3">
+          <aside className="order-3 min-w-0 space-y-3">
             <ColonyPanel objectives={objectives} pop={pop} stalls={stalls} stock={stock} />
             <section aria-label="Ayuda rápida" className="rounded-2xl border border-amber-200/15 bg-[#101a12]/95 p-4 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]">
               <h2 className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-200/90">
@@ -237,22 +249,13 @@ export default function PlayPage() {
                 <li><b className="text-amber-200">2.</b> Come: granja → molino → panadería + pozo.</li>
                 <li><b className="text-amber-200">3.</b> Forja: minas → fundición → armería → cuartel.</li>
                 <li><b className="text-amber-200">4.</b> Une todo con 🛤 caminos: sin camino la mercancía tarda (📦 pilas, 🚚 atascos).</li>
-                <li><b className="text-amber-200">6.</b> Explora con 🔭 (cada torre suma uno): la 🌫 niebla esconde terreno y al rival.</li>
-                <li><b className="text-amber-200">5.</b> Vigila ⚠ paradas y guarnece torres: el rival ataca.</li>
+                <li><b className="text-amber-200">5.</b> Explora con 🔭 (cada torre suma uno): la 🌫 niebla esconde terreno y al rival.</li>
+                <li><b className="text-amber-200">6.</b> Vigila ⚠ paradas y guarnece torres: el rival ataca.</li>
+                <li><b className="text-amber-200">7.</b> Clic en un colono y luego en el mapa para mandarlo a un punto.</li>
               </ol>
             </section>
           </aside>
         </div>
-
-        <BuildMenu
-          selected={selected}
-          roadMode={roadMode}
-          rival={rival}
-          stock={stock}
-          questTarget={quest && !quest.complete ? (quest as QuestInfo & { target: BuildingId | null }).target : null}
-          onBuild={build}
-          onRoad={startRoad}
-        />
 
         <footer className="mt-4 text-center text-[11px] leading-5 text-amber-100/45">
           Arte de edificios, colonos y fauna © Widelands Development Team (GPL-2.0+). Proyecto sin

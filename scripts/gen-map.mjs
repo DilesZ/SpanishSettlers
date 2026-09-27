@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SIZE = 28;
+const SIZE = 40;
 const TW = 132;
 const TH = 66;
 
@@ -22,8 +22,8 @@ function hash(x, y) {
 function terrainAt(tx, ty) {
   const d = Math.hypot(tx - SIZE / 2, ty - SIZE / 2);
   const n = hash(tx, ty);
-  if (d > 12.5) return ['water', 'waterB', 'waterC'][Math.floor(hash(tx * 5, ty * 3) * 3)];
-  if (d > 11.2) return 'sand';
+  if (d > SIZE * 0.4464) return ['water', 'waterB', 'waterC'][Math.floor(hash(tx * 5, ty * 3) * 3)];
+  if (d > SIZE * 0.4) return 'sand';
   if (n > 0.9) return 'mountain';
   if (n > 0.72) return 'forest';
   if (n > 0.66) return 'dirt';

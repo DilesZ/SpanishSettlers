@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { scatterVegetation } from '@/three/vegetation';
+import { ISLAND_SIZE } from '@/game/maps/island';
 
 describe('vegetación 3D', () => {
   it('reparte según bioma y es determinista', () => {
@@ -12,7 +13,7 @@ describe('vegetación 3D', () => {
     expect(a.flowers.length).toBeGreaterThan(5);
     for (const t of [...a.trees, ...a.rocks, ...a.flowers]) {
       expect(t.tx).toBeGreaterThanOrEqual(0);
-      expect(t.tx).toBeLessThan(28);
+      expect(t.tx).toBeLessThan(ISLAND_SIZE);
     }
   });
 

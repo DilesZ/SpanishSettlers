@@ -127,6 +127,8 @@ export class GameScene extends Phaser.Scene {
   // retardo por distancia de caminos. Cortar = ETA x2+2 y atasco visible.
   private transport: TransportState = createTransportState();
   private pileMarks = new Map<string, Phaser.GameObjects.Text>();
+  /** Colono seleccionado para órdenes directas (clic-colono + clic-destino). */
+  private selectedWalker: Walker | null = null;
   private pileIcons = new Map<string, Phaser.GameObjects.Image>();
   private buildBars = new Map<string, Phaser.GameObjects.Graphics>();
   // ---------- Naturaleza viva: árboles talables y rocas (colono↔terreno) ----
@@ -711,14 +713,16 @@ export class GameScene extends Phaser.Scene {
     });
     this.input.on('pointerup', () => { dragging = false; });
     this.input.mouse?.disableContextMenu();
-    this.cameras.main.setBounds(-2200, -600, 4400, 3200);
+    // Isla 40 (iso 132x66): x ±2574, y 0..2574 + margen.
+    this.cameras.main.setBounds(-3000, -800, 6000, 4200);
 
     // La barra de recursos vive en React (/play). En Phaser solo avisos.
     this.hintText = this.add.text(12, 12, '', { fontSize: '13px', color: '#fde68a', backgroundColor: '#000000aa', padding: { x: 10, y: 7 } })
       .setScrollFactor(0).setDepth(9950);
 
     const homeMm = this.iso(this.center.x, this.center.y);
-    this.minimap = this.cameras.add(0, 0, 190, 140).setZoom(0.055).centerOn(homeMm.x, homeMm.y);
+    // Zoom proporcional al tamaño (0.055 era para isla 28).
+    this.minimap = this.cameras.add(0, 0, 190, 140).setZoom(0.055 * (28 / MAP)).centerOn(homeMm.x, homeMm.y);
     this.minimap.setBackgroundColor('#0d1f16');
     this.layoutMinimap();
   }
@@ -758,8 +762,10 @@ export class GameScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-ESC', () => {
       this.pendingBuild = null;
       this.pendingRoad = false;
+      this.selectedWalker = null;
       this.hintText?.setText('');
       this.clearGhost();
+      this.hideSelectRing();
     });
     if (this.input.keyboard) {
       this.wasd = this.input.keyboard.addKeys('W,A,S,D,Q,E') as { W: Phaser.Input.Keyboard.Key; A: Phaser.Input.Keyboard.Key; S: Phaser.Input.Keyboard.Key; D: Phaser.Input.Keyboard.Key; Q: Phaser.Input.Keyboard.Key; E: Phaser.Input.Keyboard.Key };
@@ -1190,7 +1196,8 @@ export class GameScene extends Phaser.Scene {
     // la fauna deambula libre.
     const costFn = w.kind === 'critter' ? undefined : (x: number, y: number) => tileCost(this.roads, x, y);
     const costTag = w.kind === 'critter' ? 'critter' : 'road';
-    const raw = findPathCached(from, { x: tx, y: ty }, MAP, MAP, blocked, 4000, costFn, costTag);
+    // Isla grande: más margen de iteraciones (el heap lo hace barato).
+    const raw = findPathCached(from, { x: tx, y: ty }, MAP, MAP, blocked, 8000, costFn, costTag);
     if (!raw || raw.length < 2) {
       w.state = 'idle';
       w.stateT = 0.5 + Math.random();
@@ -1742,6 +1749,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private killWalker(w: Walker) {
+    if (this.selectedWalker === w) {
+      this.selectedWalker = null;
+      this.hideSelectRing();
+    }
     if (w.kind === 'settler' && w.faction === 'player') this.popCount = Math.max(0, this.popCount - 1);
     this.tweens.add({ targets: w.sprite, alpha: 0, duration: 300, onComplete: () => w.sprite.destroy() });
     w.shadow.destroy();
@@ -1820,6 +1831,7 @@ export class GameScene extends Phaser.Scene {
       for (const rec of this.buildingHp.values()) rec.bar.destroy();
       this.placed = [];
       this.walkers = [];
+      this.selectedWalker = null;
       this.ships = [];
       this.enemies = [];
       this.wheatPlots = [];
@@ -2176,9 +2188,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   private stroll(w: Walker) {
-    const nx = Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-6, 6)), 2, MAP - 3);
-    const ny = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-6, 6)), 2, MAP - 3);
-    if (!this.sendWalker(w, nx, ny)) this.rest(w, 1 + Math.random() * 2);
+    // Patrulla punto a punto: al llegar, a menudo encadena otro destino
+    // en vez de pararse (la colonia se ve viva).
+    const nx = Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-10, 10)), 2, MAP - 3);
+    const ny = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-10, 10)), 2, MAP - 3);
+    if (!this.sendWalker(w, nx, ny, () => {
+      if (w.kind === 'settler' && w.faction === 'player' && !w.task && Math.random() < 0.6) {
+        this.stroll(w);
+      } else {
+        this.rest(w, 1 + Math.random() * 2);
+      }
+    })) this.rest(w, 1 + Math.random() * 2);
   }
 
   /**
@@ -2278,6 +2298,33 @@ export class GameScene extends Phaser.Scene {
       return; // la herramienta sigue activa hasta ESC
     }
     if (!this.pendingBuild) {
+      // Orden directa: hay colono seleccionado y activo → va al punto.
+      if (this.selectedWalker && this.selectedWalker.sprite.active) {
+        const w = this.selectedWalker;
+        this.selectedWalker = null;
+        if (this.sendWalker(w, tx, ty, () => this.assignJob(w))) {
+          this.hintText?.setText('🚶 En marcha').setY(44);
+          playSfx('click');
+          this.time.delayedCall(1500, () => this.hintText.setText(''));
+        } else {
+          this.hideSelectRing();
+        }
+        return;
+      }
+      this.selectedWalker = null;
+      // Selección de colono propio (en su loseta o vecina, sin edificio).
+      if (!this.buildingTiles.has(`${tx},${ty}`)) {
+        const w = this.walkers.find((k) =>
+          k.kind === 'settler' && k.faction === 'player' && k.sprite.active &&
+          Math.abs(this.walkerTile(k).x - tx) + Math.abs(this.walkerTile(k).y - ty) <= 1);
+        if (w) {
+          this.selectedWalker = w;
+          this.showSelectRing(tx, ty);
+          this.hintText?.setText('🚶 Colono seleccionado: clic en un destino (ESC cancela)').setY(44);
+          playSfx('select');
+          return;
+        }
+      }
       // selección: publica la ficha para el panel React
       const game = (window as unknown as { __game?: { inspect: (x: number, y: number) => object | null } }).__game;
       ww.__inspect = game?.inspect(tx, ty) ?? null;
@@ -2901,6 +2948,10 @@ export class GameScene extends Phaser.Scene {
 
   /** Elimina un caminante sin tocar el censo (ya descontado). */
   private killWalkerSilent(w: Walker) {
+    if (this.selectedWalker === w) {
+      this.selectedWalker = null;
+      this.hideSelectRing();
+    }
     w.sprite.destroy();
     w.shadow.destroy();
     w.goodsIcon?.destroy();

@@ -62,7 +62,8 @@ function isLand(t: string): boolean {
   return t !== 'water' && t !== 'waterB' && t !== 'waterC' && t !== 'mountain';
 }
 
-/** Sitio para la base rival: tierra a 6-10 losetas del centro con barrio libre. */
+/** Sitio para la base rival: tierra separada del centro con barrio libre.
+ *  Distancia proporcional al mapa (6-10 en isla 28). */
 export function findRivalBase(
   terrainAt: (x: number, y: number) => string,
   size: number,
@@ -71,10 +72,12 @@ export function findRivalBase(
 ): { x: number; y: number } | null {
   let best: { x: number; y: number } | null = null;
   let bestScore = -1;
+  const minD = Math.round(size * 0.21);
+  const maxD = Math.round(size * 0.36);
   for (let ty = 2; ty < size - 2; ty++) {
     for (let tx = 2; tx < size - 2; tx++) {
       const d = Math.hypot(tx - cx, ty - cy);
-      if (d < 6 || d > 10 || !isLand(terrainAt(tx, ty))) continue;
+      if (d < minD || d > maxD || !isLand(terrainAt(tx, ty))) continue;
       let score = 0;
       for (let oy = -2; oy <= 2; oy++) {
         for (let ox = -2; ox <= 2; ox++) {
