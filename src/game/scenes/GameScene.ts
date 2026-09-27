@@ -7,7 +7,7 @@ import { bumpPathCache, findPath, findPathCached, smoothPath, type GridPos } fro
 import { applyDamage, attackReach, recruitCost, soldierDps, towerDps, VICTORY_WAVES, waveSpec } from '../systems/combat';
 import { OBJECTIVES, isComplete } from '../systems/objectives';
 import { isNavigable, pickFishingCircuit, touchesWater } from '../systems/ships';
-import { ISLAND_SIZE, TILE_H, TILE_W, terrainAt } from '../maps/island';
+import { ISLAND_SIZE, TILE_H, TILE_W, shoreLandTiles, terrainAt } from '../maps/island';
 import { missingInputs, payCost, produceToBuffers, tickAutoProducers, tickJob, type ProductionJob, type Stock } from '../systems/economy';
 import { foodPerTick, growthPerTick, housingFor, moraleOf } from '../systems/population';
 import { findRivalBase, lateRivalBuild, nextRivalBuild, rivalStartingStock, RIVAL_ORDER, type Owner } from '../systems/rival';
@@ -167,6 +167,8 @@ export class GameScene extends Phaser.Scene {
   private selectHalo: Phaser.GameObjects.Image | null = null;
   private forestTiles: { x: number; y: number }[] = [];
   private shoreTiles: { x: number; y: number }[] = [];
+  /** Orillas de desembarco (oleadas e inmigrantes llegan del mar). */
+  private landingShores: { x: number; y: number }[] = [];
   private hillTiles: { x: number; y: number }[] = [];
   private hoverMarker!: Phaser.GameObjects.Graphics;
   private minimap?: Phaser.Cameras.Scene2D.Camera;
@@ -515,6 +517,7 @@ export class GameScene extends Phaser.Scene {
     this.hoverMarker.strokePath();
     this.hoverMarker.setVisible(false);
 
+    this.landingShores = shoreLandTiles(terrainAt, MAP);
     const c = this.iso(this.center.x, this.center.y);
     this.territoryFill = this.add.ellipse(c.x, c.y - 8, this.territoryRadius * 136, this.territoryRadius * 68, 0xfbbf24, 0.05).setDepth(9390);
     this.drawTerritoryPosts();
@@ -1495,15 +1498,19 @@ export class GameScene extends Phaser.Scene {
     this.waveNo++;
     this.nextWaveAt = this.time.now + 100000;
     const spec = waveSpec(this.waveNo);
-    // borde del mapa: loseta de tierra aleatoria en el perímetro
-    const edge: GridPos[] = [];
-    for (let i = 2; i < MAP - 2; i++) {
-      edge.push({ x: i, y: 2 }, { x: i, y: MAP - 3 }, { x: 2, y: i }, { x: MAP - 3, y: i });
+    // Desembarco: los incursores llegan del mar por las orillas (el borde
+    // del mapa es agua en islas grandes). Sin edificios que ocupar, fuera.
+    const land = this.landingShores.filter((p) => !this.buildingTiles.has(`${p.x},${p.y}`));
+    if (!land.length) {
+      const edge: GridPos[] = [];
+      for (let i = 2; i < MAP - 2; i++) {
+        edge.push({ x: i, y: 2 }, { x: i, y: MAP - 3 }, { x: 2, y: i }, { x: MAP - 3, y: i });
+      }
+      for (const p of edge) {
+        const t = terrainAt(p.x, p.y);
+        if (t !== 'water' && t !== 'waterB' && t !== 'waterC' && t !== 'mountain') land.push(p);
+      }
     }
-    const land = edge.filter((p) => {
-      const t = terrainAt(p.x, p.y);
-      return t !== 'water' && t !== 'waterB' && t !== 'waterC' && t !== 'mountain';
-    });
     if (!land.length || !this.placed.length) return;
     const archers = this.waveNo % 3 === 0 ? 2 : 0;
     for (let i = 0; i < spec.count; i++) {
@@ -2187,11 +2194,23 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** ¿Pisable a pie? (agua y montaña no: los paseos no van al mar). */
+  private walkableTile(tx: number, ty: number): boolean {
+    if (tx < 1 || ty < 1 || tx >= MAP - 1 || ty >= MAP - 1) return false;
+    const t = terrainAt(tx, ty);
+    return t !== 'water' && t !== 'waterB' && t !== 'waterC' && t !== 'mountain';
+  }
+
   private stroll(w: Walker) {
     // Patrulla punto a punto: al llegar, a menudo encadena otro destino
-    // en vez de pararse (la colonia se ve viva).
-    const nx = Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-10, 10)), 2, MAP - 3);
-    const ny = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-10, 10)), 2, MAP - 3);
+    // en vez de pararse (la colonia se ve viva). Destino siempre en tierra.
+    let nx = Math.round(this.center.x);
+    let ny = Math.round(this.center.y);
+    for (let i = 0; i < 12; i++) {
+      const cx = Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-10, 10)), 2, MAP - 3);
+      const cy = Phaser.Math.Clamp(Math.round(this.center.y + Phaser.Math.Between(-10, 10)), 2, MAP - 3);
+      if (this.walkableTile(cx, cy)) { nx = cx; ny = cy; break; }
+    }
     if (!this.sendWalker(w, nx, ny, () => {
       if (w.kind === 'settler' && w.faction === 'player' && !w.task && Math.random() < 0.6) {
         this.stroll(w);
@@ -2855,12 +2874,12 @@ export class GameScene extends Phaser.Scene {
     this.assignJob(w);
   }
 
-  /** Destino scout: loseta inexplorada al azar (20 intentos) o paseo. */
+  /** Destino scout: loseta inexplorada y pisable (20 intentos) o paseo. */
   private scoutTarget(): GridPos {
     for (let i = 0; i < 20; i++) {
       const nx = Phaser.Math.Between(2, MAP - 3);
       const ny = Phaser.Math.Between(2, MAP - 3);
-      if (fogAt(this.fog, MAP, nx, ny) === HIDDEN) return { x: nx, y: ny };
+      if (fogAt(this.fog, MAP, nx, ny) === HIDDEN && this.walkableTile(nx, ny)) return { x: nx, y: ny };
     }
     return {
       x: Phaser.Math.Clamp(Math.round(this.center.x + Phaser.Math.Between(-8, 8)), 2, MAP - 3),
@@ -2891,7 +2910,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Loseta de tierra en el borde para entrar/salir del mapa. */
+  /** Orilla de desembarco: los colonos llegan del mar, no del borde. */
   private edgeLandTile(): GridPos | null {
+    const free = this.landingShores.filter((p) => !this.buildingTiles.has(`${p.x},${p.y}`));
+    if (free.length) return free[Phaser.Math.Between(0, free.length - 1)];
     const edge: GridPos[] = [];
     for (let i = 2; i < MAP - 2; i++) {
       edge.push({ x: i, y: 2 }, { x: i, y: MAP - 3 }, { x: 2, y: i }, { x: MAP - 3, y: i });
@@ -3131,6 +3153,7 @@ export class GameScene extends Phaser.Scene {
         map: () => { explored: number };
         siege: () => { nextWaveIn: number; wave: number; wavesToWin: number; repelled: number };
         quest: () => { step: number; complete: boolean; target: BuildingId | null; steps: { id: string; text: string; done: boolean }[] };
+        wave: () => number;
         speed: () => number;
         setSpeed: (s: number) => void;
         stock: () => Stock;
@@ -3196,6 +3219,12 @@ export class GameScene extends Phaser.Scene {
         inTransit: this.transport.queue.reduce((a, l) => a + l.amount, 0),
         congested: congestedKeys(this.transport, 6).length,
       }),
+      // Hook QA: dispara una oleada ya (sondas; el reloj Phaser va en
+      // slow-motion con SwiftShader/headless, en navegadores reales a 60fps va solo).
+      wave: () => {
+        this.spawnWave();
+        return this.waveNo;
+      },
       map: () => ({ explored: exploredPercent(this.fog) }),
       siege: () => ({
         nextWaveIn: Math.max(0, Math.round((this.nextWaveAt - this.time.now) / 1000)),

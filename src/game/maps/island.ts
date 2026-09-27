@@ -36,6 +36,32 @@ export function tileToPx(tx: number, ty: number): { x: number; y: number } {
   return { x: (tx - ty) * (TILE_W / 2), y: (tx + ty) * (TILE_H / 2) };
 }
 
+/**
+ * Orillas de desembarco: losetas de tierra (no agua ni montaña) con al
+ * menos un vecino de agua. Ahí aparecen oleadas e inmigrantes: en islas
+ * grandes el borde del mapa es mar abierto y el anillo perimetral no vale.
+ */
+export function shoreLandTiles(
+  terrain: (tx: number, ty: number) => string,
+  size: number,
+): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  const isWater = (t: string) => t === 'water' || t === 'waterB' || t === 'waterC';
+  for (let ty = 2; ty < size - 2; ty++) {
+    for (let tx = 2; tx < size - 2; tx++) {
+      const t = terrain(tx, ty);
+      if (isWater(t) || t === 'mountain') continue;
+      if (
+        isWater(terrain(tx + 1, ty)) || isWater(terrain(tx - 1, ty)) ||
+        isWater(terrain(tx, ty + 1)) || isWater(terrain(tx, ty - 1))
+      ) {
+        out.push({ x: tx, y: ty });
+      }
+    }
+  }
+  return out;
+}
+
 export interface LogicObject { name: string; dx: number; dy: number; props: Record<string, string | number> }
 
 export const LOGIC_OBJECTS: LogicObject[] = [

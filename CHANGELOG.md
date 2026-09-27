@@ -2,6 +2,13 @@
 
 Todos los cambios documentados por checkpoint (tags `v*`).
 
+## [sin tag] — Playtest real + desembarco
+- Oleadas e inmigrantes desembarcan en orillas (el borde es mar en isla
+  grande); paseos/scouts pisan tierra; hook QA `wave()`; playtest e2e que
+  juega una partida entera sin errores de consola.
+- Ver `docs/devlog/040-playtest-desembarco.md`.
+- Verificación: 162 unit, tsc limpio, build OK, e2e 3/3, lint sin nuevos.
+
 ## [sin tag] — Sin guía + pantalla completa
 - Fuera la Guía del colono (grid a 2 columnas); botón ⛶ de pantalla
   completa en el marco del mapa. Ver `docs/devlog/039-sin-guia-fullscreen.md`.
