@@ -2,6 +2,11 @@
 
 Todos los cambios documentados por checkpoint (tags `v*`).
 
+## [sin tag] — Sin guía + pantalla completa
+- Fuera la Guía del colono (grid a 2 columnas); botón ⛶ de pantalla
+  completa en el marco del mapa. Ver `docs/devlog/039-sin-guia-fullscreen.md`.
+- Verificación: 161 unit, tsc limpio, build OK, e2e 2/2, lint sin nuevos.
+
 ## [sin tag] — Misiones abajo, sin categorías, isla 64
 - Misiones a ancho completo bajo el mapa; BuildMenu en lista única sin
   pestañas; isla 64x64 con cámara, minimapa, A* y rival proporcionales.
