@@ -32,7 +32,7 @@ let actx: AudioContext | null = null;
  * completar quest/obra, horn grave al avistar rival u oleada. El audio nunca
  * debe romper el juego: todo envuelto en try/catch y no-op sin gesto.
  */
-export function playBlip(kind: 'pop' | 'coin' | 'horn') {
+export function playBlip(kind: 'pop' | 'coin' | 'horn' | 'bell') {
   try {
     if (typeof window === 'undefined') return;
     const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -60,6 +60,25 @@ export function playBlip(kind: 'pop' | 'coin' | 'horn') {
       gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22);
       osc.start(t0);
       osc.stop(t0 + 0.23);
+    } else if (kind === 'bell') {
+      // Campana de asedio: dos parciales que decaen (procedural, sin samples).
+      const osc2 = actx.createOscillator();
+      const gain2 = actx.createGain();
+      osc2.connect(gain2);
+      gain2.connect(actx.destination);
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(660, t0);
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(990, t0);
+      gain.gain.setValueAtTime(0.16, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 1.2);
+      gain2.gain.setValueAtTime(0.08, t0);
+      gain2.gain.exponentialRampToValueAtTime(0.001, t0 + 0.9);
+      osc.start(t0);
+      osc.stop(t0 + 1.25);
+      osc2.start(t0);
+      osc2.stop(t0 + 0.95);
+      return;
     } else {
       osc.type = 'sawtooth';
       osc.frequency.setValueAtTime(147, t0);

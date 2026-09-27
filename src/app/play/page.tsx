@@ -6,7 +6,9 @@ import { playSfx, unlockAudio } from '@/game/audio';
 import { isMusicEnabled, setMusicEnabled, startMusic } from '@/game/music';
 import type { BuildingId } from '@/game/data/buildings';
 import { BuildMenu } from '@/components/BuildMenu';
-import { ColonyPanel, EndingOverlay, InspectCard, QuestTracker, ResourceBar, SiegeBar, SpeedControl, TopBar, type QuestInfo, type SiegeInfo, type TransportInfo } from '@/components/HudPanels';
+import { ColonyPanel, EndingOverlay, EventTicker, InspectCard, PriorityEditor, QuestTracker, ResourceBar, SiegeBar, SpecialistsPanel, SpeedControl, TopBar, type QuestInfo, type SiegeInfo, type SpecsInfo, type TickerEvent, type TransportInfo } from '@/components/HudPanels';
+import type { ResourceId } from '@/game/data/buildings';
+import type { SpecialistTask } from '@/game/data/specialists';
 
 // Dynamic import: el canvas pesado solo en cliente (skill bundle-dynamic-imports).
 const GameCanvas = dynamic(() => import('@/components/GameCanvas'), { ssr: false });
@@ -54,6 +56,9 @@ export default function PlayPage() {
   const [explored, setExplored] = useState<number | null>(null);
   const [siege, setSiege] = useState<SiegeInfo | null>(null);
   const [quest, setQuest] = useState<QuestInfo | null>(null);
+  const [priority, setPriority] = useState<ResourceId[] | null>(null);
+  const [specs, setSpecs] = useState<SpecsInfo | null>(null);
+  const [feed, setFeed] = useState<TickerEvent[]>([]);
   const mapRef = useRef<HTMLElement | null>(null);
   const [isFs, setIsFs] = useState(false);
 
@@ -71,6 +76,11 @@ export default function PlayPage() {
           map: () => { explored: number };
           siege: () => SiegeInfo;
           quest: () => QuestInfo & { target: BuildingId | null };
+          getPriority: () => ResourceId[];
+          setPriority: (o: ResourceId[]) => void;
+          specs: () => SpecsInfo;
+          train: (t: string) => boolean;
+          events: () => TickerEvent[];
           speed: () => number;
           setSpeed: (s: number) => void;
         };
@@ -100,6 +110,18 @@ export default function PlayPage() {
           if (sg && typeof sg.nextWaveIn === 'number') setSiege(sg);
           const qu = w.__game?.quest();
           if (qu && typeof qu.step === 'number') setQuest(qu);
+          const pr = w.__game?.getPriority();
+          if (Array.isArray(pr)) setPriority([...pr]);
+          const spec = w.__game?.specs();
+          if (spec && typeof spec.geologo === 'number') setSpecs(spec);
+          const ev = w.__game?.events();
+          if (Array.isArray(ev)) {
+            setFeed((prev) => {
+              const seen = new Set(prev.map((e) => e.id));
+              const add = ev.filter((e) => !seen.has(e.id));
+              return add.length ? [...prev, ...add].slice(-30) : prev;
+            });
+          }
           const sp = w.__game?.speed();
           if (typeof sp === 'number') setSpeed(sp);
         } catch { /* transporte aún no listo */ }
@@ -116,6 +138,8 @@ export default function PlayPage() {
       load: () => boolean;
       hasSave: () => string | null;
       setSpeed: (s: number) => void;
+      setPriority: (o: ResourceId[]) => void;
+      train: (t: string) => boolean;
     };
   }).__game;
 
@@ -123,6 +147,18 @@ export default function PlayPage() {
     unlockAudio();
     game()?.setSpeed(s);
     setSpeed(s);
+  };
+
+  const changePriority = (o: ResourceId[]) => {
+    unlockAudio();
+    playSfx('click');
+    game()?.setPriority(o);
+    setPriority([...o]);
+  };
+
+  const trainSpec = (t: SpecialistTask) => {
+    unlockAudio();
+    game()?.train(t);
   };
 
   const refreshSave = () => setSavedAt(game()?.hasSave() ?? null);
@@ -212,6 +248,7 @@ export default function PlayPage() {
         <SpeedControl speed={speed} transport={transport} explored={explored} onSpeed={changeSpeed} />
         <QuestTracker quest={quest} />
         <SiegeBar siege={siege} />
+        <EventTicker events={feed} />
 
         <div className="mt-3 grid grid-cols-1 items-start gap-3 xl:grid-cols-[300px_minmax(0,1fr)]">
           {/* Construcción: lateral en xl (una sola instancia, compacta por CSS) */}
@@ -270,6 +307,11 @@ export default function PlayPage() {
         {/* Misiones y estado bajo el mapa (ancho completo) */}
         <div className="mt-3">
           <ColonyPanel objectives={objectives} pop={pop} stalls={stalls} stock={stock} />
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 items-start gap-3 md:grid-cols-2">
+          <SpecialistsPanel specs={specs} stock={stock} onTrain={trainSpec} />
+          <PriorityEditor order={priority} onChange={changePriority} />
         </div>
 
         <footer className="mt-4 text-center text-[11px] leading-5 text-amber-100/45">

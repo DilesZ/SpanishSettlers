@@ -45,8 +45,10 @@ export function growthPerTick(s: GrowthInput, maxPop = 60): number {
   return 0.02 * (0.5 + s.morale / 100);
 }
 
-/** Comida (pan/pescado) que la colonia consume por tick. */
+/** Comida (pan/pescado) que la colonia consume por tick.
+ *  R1-balance: 1 panadería (0.167/tick) debe sostener censo inicial + 1 mina
+ *  (0.1/tick); crecer exige más panaderías. */
 export function foodPerTick(population: number): number {
   if (population <= 0) return 0;
-  return population / 200;
+  return population / 300;
 }

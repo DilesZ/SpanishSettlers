@@ -2,6 +2,13 @@
 
 Todos los cambios documentados por checkpoint (tags `v*`).
 
+## [sin tag] — Balance comida-metal + playtest total
+- Minas cada 12 ticks, censo pop/300, recetas con tiempos reales: la cadena
+  del metal arranca con 1-2 panaderías y escala con más.
+- Playtest e2e que juega una partida entera verificando por id propio.
+- Ver `docs/devlog/041-balance-playtest.md`.
+- Verificación: 166 unit, tsc limpio, build OK, e2e 3/3, lint sin nuevos.
+
 ## [sin tag] — Playtest real + desembarco
 - Oleadas e inmigrantes desembarcan en orillas (el borde es mar en isla
   grande); paseos/scouts pisan tierra; hook QA `wave()`; playtest e2e que

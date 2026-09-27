@@ -31,9 +31,55 @@ export const TRANSPORT_PRIORITY: ResourceId[] = [
   'espada', 'arco',
 ];
 
-export function priorityOf(r: ResourceId): number {
-  const i = TRANSPORT_PRIORITY.indexOf(r);
+export function priorityOf(r: ResourceId, order: readonly ResourceId[] = TRANSPORT_PRIORITY): number {
+  const i = order.indexOf(r);
   return i < 0 ? 99 : i;
+}
+
+/** Grupos para el editor de prioridades (estilo S4: el jugador ordena). */
+export interface PriorityGroup {
+  id: string;
+  label: string;
+  resources: ResourceId[];
+}
+
+export const PRIORITY_GROUPS: PriorityGroup[] = [
+  { id: 'comida', label: 'Comida', resources: ['pan', 'pez', 'harina', 'grano', 'agua'] },
+  { id: 'madera', label: 'Madera', resources: ['madera', 'tablon'] },
+  { id: 'piedra', label: 'Piedra', resources: ['piedra'] },
+  { id: 'metal', label: 'Metal', resources: ['carbon', 'hierro', 'oro'] },
+  { id: 'industria', label: 'Industria', resources: ['lingoteHierro', 'lingoteOro', 'herramienta'] },
+  { id: 'militar', label: 'Militar', resources: ['espada', 'arco'] },
+];
+
+export function orderFromGroups(groups: PriorityGroup[]): ResourceId[] {
+  return groups.flatMap((g) => g.resources);
+}
+
+/** Mueve un grupo ▲/▼ (puro, inmutable). Fuera de rango = igual. */
+export function moveGroup<T>(list: T[], index: number, dir: -1 | 1): T[] {
+  const j = index + dir;
+  if (index < 0 || j < 0 || j >= list.length) return [...list];
+  const c = [...list];
+  [c[index], c[j]] = [c[j], c[index]];
+  return c;
+}
+
+/** Orden guardada → válida: filtra desconocidos y completa ausentes. */
+export function sanitizeOrder(order: unknown): ResourceId[] {
+  const known = new Set<string>(TRANSPORT_PRIORITY);
+  const out: ResourceId[] = [];
+  if (Array.isArray(order)) {
+    for (const r of order) {
+      if (typeof r === 'string' && known.has(r) && !out.includes(r as ResourceId)) {
+        out.push(r as ResourceId);
+      }
+    }
+  }
+  for (const r of TRANSPORT_PRIORITY) {
+    if (!out.includes(r)) out.push(r);
+  }
+  return out;
 }
 
 export function createTransportState(): TransportState {
@@ -99,8 +145,10 @@ export function requestShipments(
     bandwidth: number;
     centralKey: string;
     distanceOf: (fromKey: string) => DistanceInfo;
+    order?: readonly ResourceId[];
   },
 ): { moved: PendingLot[]; stillWaiting: number } {
+  const order = opts.order ?? TRANSPORT_PRIORITY;
   const entries: { key: string; resource: ResourceId; amount: number; pri: number; total: number }[] = [];
   for (const [key, buf] of Object.entries(state.buffers)) {
     if (key === opts.centralKey) continue;
@@ -108,7 +156,7 @@ export function requestShipments(
       const amount = v ?? 0;
       if (amount <= 0) continue;
       const resource = rk as ResourceId;
-      entries.push({ key, resource, amount, pri: priorityOf(resource), total: bufferTotal(buf) });
+      entries.push({ key, resource, amount, pri: priorityOf(resource, order), total: bufferTotal(buf) });
     }
   }
   entries.sort((a, b) => a.pri - b.pri || b.total - a.total);
@@ -165,6 +213,7 @@ export function congestedKeys(state: TransportState, threshold = 6): string[] {
 export function pickCarrierJob(
   state: TransportState,
   centralKey: string,
+  order: readonly ResourceId[] = TRANSPORT_PRIORITY,
 ): { fromKey: string; resource: ResourceId } | null {
   let best: { fromKey: string; resource: ResourceId; pri: number; total: number } | null = null;
   for (const [key, buf] of Object.entries(state.buffers)) {
@@ -174,7 +223,7 @@ export function pickCarrierJob(
     for (const [rk, v] of Object.entries(buf)) {
       if ((v ?? 0) <= 0) continue;
       const resource = rk as ResourceId;
-      const pri = priorityOf(resource);
+      const pri = priorityOf(resource, order);
       if (!best || pri < best.pri || (pri === best.pri && total > best.total)) {
         best = { fromKey: key, resource, pri, total };
       }

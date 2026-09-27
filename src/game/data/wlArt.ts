@@ -28,5 +28,6 @@ export function wlBuildingScale(w: number, h: number): number {
   return Math.min(2.4, Math.max(0.85, 110 / Math.max(w, h)));
 }
 export function wlWorkerScale(fh: number): number {
-  return Math.min(1.5, Math.max(0.8, 52 / fh));
+  // Colonos un 12% más grandes: legibles con zoom, como manda el género.
+  return Math.min(1.6, Math.max(0.9, (52 / fh) * 1.12));
 }

@@ -326,16 +326,18 @@ function foamEdge(edge) {
 }
 
 // MISMO orden y mismos 10 GIDs que antes (tests/unit/tilemap.test.ts).
+// Paleta viva estilo cartoon-RTS (propia): verdes amarillentos saturados,
+// agua turquesa brillante, arena cálida. Mismos GIDs y semillas: solo color.
 const TILES = [
-  ['grass', 11, '#5d9b47', ['#4e8a3c', '#6cab57'], { kind: 'grass', bladeDark: '#3e7532', bladeLight: '#8cc47a', pebbleDark: '#476e39', pebbleLight: '#8cc47a' }],
-  ['grassB', 12, '#558f43', ['#487c38', '#63a251'], { kind: 'grass', bladeDark: '#38682c', bladeLight: '#7fb86c', pebbleDark: '#3f6534', pebbleLight: '#7fb86c' }],
-  ['grassC', 13, '#64a34e', ['#548739', '#74b45c'], { kind: 'grass', bladeDark: '#457a36', bladeLight: '#95cc82', pebbleDark: '#4a7440', pebbleLight: '#95cc82' }],
-  ['dirt', 14, '#9c7c4e', ['#8a6a40', '#b08c5c'], { kind: 'dirt' }],
-  ['sand', 15, '#dfc084', ['#d0af72', '#ecd096'], { kind: 'sand' }],
-  ['water', 16, '#3b78c4', ['#5b96d8', '#7fb2e8'], { kind: 'water', streaks: 10, deep: ['#2c5f9e', '#26538c', '#1e4e8a'] }],
-  ['waterB', 17, '#3974bd', ['#5890d4', '#7caede'], { kind: 'water', streaks: 10, deep: ['#2a5b99', '#244f87', '#1c4a85'] }],
-  ['waterC', 18, '#3e7cc9', ['#5e99dc', '#84b6e8'], { kind: 'water', streaks: 10, deep: ['#2e639f', '#285790', '#20508c'] }],
-  ['forest', 19, '#3d7a33', ['#32682b', '#4a8c3e'], { kind: 'forest', bladeDark: '#26491f', bladeLight: '#5da24e' }],
+  ['grass', 11, '#5da24b', ['#4c8a3a', '#71bd58'], { kind: 'grass', bladeDark: '#3c7030', bladeLight: '#93d182', pebbleDark: '#476e39', pebbleLight: '#8cc47a' }],
+  ['grassB', 12, '#579a45', ['#46904a', '#68b356'], { kind: 'grass', bladeDark: '#36702e', bladeLight: '#86c873', pebbleDark: '#3f6534', pebbleLight: '#7fb86c' }],
+  ['grassC', 13, '#69b054', ['#589a3e', '#7fc661'], { kind: 'grass', bladeDark: '#457a36', bladeLight: '#9cd98a', pebbleDark: '#4a7440', pebbleLight: '#95cc82' }],
+  ['dirt', 14, '#a3834f', ['#8a6a40', '#b8925e'], { kind: 'dirt' }],
+  ['sand', 15, '#e3c384', ['#d2b273', '#f2d89c'], { kind: 'sand' }],
+  ['water', 16, '#2f7fd6', ['#55a0e2', '#86c2f2'], { kind: 'water', streaks: 10, deep: ['#2c5f9e', '#26538c', '#1e4e8a'] }],
+  ['waterB', 17, '#2d7acc', ['#5298de', '#83b6ee'], { kind: 'water', streaks: 10, deep: ['#2a5b99', '#244f87', '#1c4a85'] }],
+  ['waterC', 18, '#3382d8', ['#5aa0e6', '#8abef2'], { kind: 'water', streaks: 10, deep: ['#2e639f', '#285790', '#20508c'] }],
+  ['forest', 19, '#3f8342', ['#34702e', '#52a047'], { kind: 'forest', bladeDark: '#26491f', bladeLight: '#66b257' }],
   ['mountain', 20, '#8d8778', ['#7a7466', '#9d9788'], { kind: 'mountain', cracks: 4, blotches: 20, crackColor: '#5d574b' }],
 ];
 

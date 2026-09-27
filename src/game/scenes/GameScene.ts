@@ -8,7 +8,7 @@ import { applyDamage, attackReach, recruitCost, soldierDps, towerDps, VICTORY_WA
 import { OBJECTIVES, isComplete } from '../systems/objectives';
 import { isNavigable, pickFishingCircuit, touchesWater } from '../systems/ships';
 import { ISLAND_SIZE, TILE_H, TILE_W, shoreLandTiles, terrainAt } from '../maps/island';
-import { missingInputs, payCost, produceToBuffers, tickAutoProducers, tickJob, type ProductionJob, type Stock } from '../systems/economy';
+import { missingInputs, payCost, produceToBuffers, replenishReserve, tickAutoProducers, tickJob, type ProductionJob, type Stock } from '../systems/economy';
 import { foodPerTick, growthPerTick, housingFor, moraleOf } from '../systems/population';
 import { findRivalBase, lateRivalBuild, nextRivalBuild, rivalStartingStock, RIVAL_ORDER, type Owner } from '../systems/rival';
 import { addRoad, createRoadNet, deserializeRoads, hasRoad, removeRoad, roadDistance, roadNeighbors, serializeRoads, tileCost, ROAD_SPEED_BONUS, type RoadNet } from '../systems/roads';
@@ -21,6 +21,10 @@ import { dustBurst, builtBurst, chopBurst, floatText, hitFlash, recruitRing, har
 import { hasLivingWood, nearestLivingWood, terrainSpeed, type NatureNode } from '../systems/terrain';
 import { createFog, deserializeFog, EXPLORED, exploredPercent, fogAt, HIDDEN, isExplored, revealCircle, serializeFog, settleFog, VISIBLE, type FogGrid } from '../systems/fog';
 import { questState } from '../systems/quest';
+import { pushEvent, type GameEvent } from '../systems/events';
+import { SPECIALISTS, type SpecialistTask, type WalkerTask } from '../data/specialists';
+import { canAfford } from '../systems/economy';
+import { sanitizeOrder, TRANSPORT_PRIORITY } from '../systems/transport';
 import { computeEdges, placeEdges } from '../fx/edges';
 
 // Rama B: arte GPL de Widelands (ver docs/ATRIBUCION.md + wlArt.ts).
@@ -65,8 +69,8 @@ interface Walker {
   foe: Enemy | null;
   /** Throttle de polvo de pasos (siguiente tiempo permitido, ms de escena). */
   dustT: number;
-  /** Tarea especial: 'scout' = explorador (usa anims de settler teñido). */
-  task?: 'scout';
+  /** Tarea especial: explorador u oficio (usan anims base teñidas). */
+  task?: WalkerTask;
 }
 
 interface Enemy {
@@ -142,6 +146,17 @@ export class GameScene extends Phaser.Scene {
   private fog: FogGrid = createFog(MAP);
   private fogGfx?: Phaser.GameObjects.Graphics;
   private rivalSpotted = false;
+  /** Orden de prioridad de mercancías del jugador (editor estilo S4). */
+  private priorityOrder: ResourceId[] = [...TRANSPORT_PRIORITY];
+  /** Ticker de eventos (cinta de avisos con textos propios). */
+  private eventLog: GameEvent[] = [];
+  private eventId = 1;
+
+  private emit(text: string) {
+    const r = pushEvent(this.eventLog, this.eventId, text);
+    this.eventLog = r.log;
+    this.eventId = r.nextId;
+  }
   /** Velocidad de simulación x1/x2/x4 (ritmo web: S4 es lento, el navegador no). */
   private gameSpeed = 1;
   // ---------- Población (Fase 3): techo real, comida, moral y crecimiento ----------
@@ -661,8 +676,9 @@ export class GameScene extends Phaser.Scene {
 
   private setupCamera() {
     const cam = this.cameras.main;
-    cam.setZoom(0.7);
-    this.zoomTarget = 0.7;
+    // Zoom 1.0 por defecto: el mundo se lee denso, como el género manda.
+    cam.setZoom(1.0);
+    this.zoomTarget = 1.0;
     const home = this.iso(this.center.x, this.center.y);
     cam.centerOn(home.x, home.y);
     cam.fadeIn(600);
@@ -911,7 +927,13 @@ export class GameScene extends Phaser.Scene {
         .setRotation(ang);
       parts.push(stubRim, stub);
     }
-    const c = this.add.container(x, y, parts).setDepth(90);
+    const c = this.add.container(x, y, parts);
+    // Banderín en finales de camino (seña del género, procedural propio).
+    if (parts.length <= 2) {
+      const flag = this.add.image(20, -12, 'post').setScale(0.7);
+      c.add(flag);
+    }
+    c.setDepth(90);
     this.roadDecals.set(k, c);
   }
 
@@ -1535,6 +1557,8 @@ export class GameScene extends Phaser.Scene {
     }
     this.hintText?.setText(`⚔ ¡Oleada ${this.waveNo}! ${spec.count} incursores se acercan`).setY(44);
     playSfx('sword');
+    playBlip('bell');
+    this.emit(`⚔ Oleada ${this.waveNo}: ${spec.count} incursores`);
     this.time.delayedCall(4000, () => this.hintText.setText(''));
   }
 
@@ -1769,9 +1793,9 @@ export class GameScene extends Phaser.Scene {
 
   private saveGame(silent = false): string | null {
     try {
-      const scouts = this.walkers.filter((w) => w.task === 'scout' && w.sprite.active).length;
+      const specCount = (t: WalkerTask) => this.walkers.filter((w) => w.task === t && w.sprite.active).length;
       const data = {
-        v: 7,
+        v: 8,
         savedAt: Date.now(),
         stock: this.stock,
         aiStock: this.aiStock,
@@ -1785,9 +1809,10 @@ export class GameScene extends Phaser.Scene {
         transport: serializeTransport(this.transport),
         gameSpeed: this.gameSpeed,
         fog: serializeFog(this.fog),
-        scouts,
+        specs: { scout: specCount('scout'), geologo: specCount('geologo'), pionero: specCount('pionero'), ladron: specCount('ladron') },
         rivalSpotted: this.rivalSpotted,
         mineReserves: { ...this.mineReserves },
+        priority: [...this.priorityOrder],
       };
       window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
       if (!silent) playSfx('confirm');
@@ -1811,8 +1836,10 @@ export class GameScene extends Phaser.Scene {
         gameSpeed?: number;
         fog?: unknown;
         scouts?: number;
+        specs?: Partial<Record<string, number>>;
         rivalSpotted?: boolean;
         mineReserves?: unknown;
+        priority?: unknown;
       };
       if (!data || !Array.isArray(data.placed)) return false;
       // limpiar mundo
@@ -1864,6 +1891,7 @@ export class GameScene extends Phaser.Scene {
       this.morale = data.pop?.morale ?? 80;
       this.foodAcc = 0;
       this.transport = deserializeTransport((data as { transport?: unknown }).transport);
+      this.priorityOrder = sanitizeOrder((data as { priority?: unknown }).priority);
       // Niebla v6 (las v5 y anteriores re-exploran la base al cargar).
       this.fog = deserializeFog((data as { fog?: unknown }).fog, MAP);
       this.rivalSpotted = data.rivalSpotted === true;
@@ -1902,18 +1930,34 @@ export class GameScene extends Phaser.Scene {
       }
       this.spawnPopulation();
       this.spawnCritters();
-      // Exploradores guardados: reconvierte paisanos (con tinte y velocidad).
-      const wantScouts = Math.min(6, Math.max(0, Math.floor(data.scouts ?? 0)));
-      let made = 0;
-      for (const w of this.walkers) {
-        if (made >= wantScouts) break;
-        if (w.kind !== 'settler' || w.faction !== 'player' || w.role !== 'settler' || w.task === 'scout') continue;
-        w.task = 'scout';
-        w.speed = 88;
-        w.sprite.setTint(0x9fd8ff);
-        made++;
+      // Especialistas guardados (v8; v7 migra `scouts`): aparecen junto al almacén.
+      const rawSpecs = (data as { specs?: unknown }).specs;
+      const want: Partial<Record<WalkerTask, number>> =
+        rawSpecs && typeof rawSpecs === 'object'
+          ? { ...(rawSpecs as Partial<Record<WalkerTask, number>>) }
+          : { scout: Math.max(0, Math.floor(data.scouts ?? 0)) };
+      const home = this.placed.find((p) => p.owner === 'player' && p.id === 'almacen') ?? this.placed[0];
+      const mk = (task: WalkerTask, base: string, tint: number, speed: number) => {
+        if (!home) return;
+        const { x, y } = this.iso(
+          Phaser.Math.Clamp(home.tx + Phaser.Math.Between(-2, 2), 2, MAP - 3),
+          Phaser.Math.Clamp(home.ty + Phaser.Math.Between(-2, 2), 2, MAP - 3),
+        );
+        const s = this.add.sprite(x, y - 15, `wl-${base}-e`, 0).setDepth(8000);
+        s.setScale(wlWorkerScale(WL_WORKERS[base]?.dirs.e?.fh ?? 42));
+        s.setTint(tint);
+        if (this.anims.exists(`wl-walk-${base}-e`)) s.play(`wl-walk-${base}-e`);
+        const shadow = this.add.image(x, y - 1, 'shadow').setDepth(7999).setAlpha(0.6).setScale(1.2);
+        const w = this.makeWalker(s, shadow, base, 'settler');
+        w.task = task;
+        w.speed = speed;
         this.assignJob(w);
-      }
+      };
+      const n = (t: WalkerTask, fb: number) => Math.min(6, Math.max(0, Math.floor(want[t] ?? fb)));
+      for (let i = 0; i < n('scout', 0); i++) mk('scout', 'settler', 0x9fd8ff, 88);
+      for (let i = 0; i < Math.min(3, n('geologo', 0)); i++) mk('geologo', SPECIALISTS.geologo.base, SPECIALISTS.geologo.tint, SPECIALISTS.geologo.speed);
+      for (let i = 0; i < Math.min(4, n('pionero', 0)); i++) mk('pionero', SPECIALISTS.pionero.base, SPECIALISTS.pionero.tint, SPECIALISTS.pionero.speed);
+      for (let i = 0; i < Math.min(3, n('ladron', 0)); i++) mk('ladron', SPECIALISTS.ladron.base, SPECIALISTS.ladron.tint, SPECIALISTS.ladron.speed);
       // El censo manda: reponer caminantes visibles hasta el nivel guardado.
       let guard = 0;
       const settlerCount = () => this.walkers.filter((w) => w.kind === 'settler' && w.faction === 'player').length;
@@ -2032,7 +2076,7 @@ export class GameScene extends Phaser.Scene {
     const role = army % 2 === 0 ? 'soldier' : 'archer';
     // Reclutar viste a un colono (no aparece de la nada); si no hay
     // paisanos libres, llega uno nuevo (el censo lo refleja).
-    const volunteer = this.walkers.find((x) => x.kind === 'settler' && x.faction === 'player' && x.role === 'settler' && x.task !== 'scout' && x.sprite.active);
+    const volunteer = this.walkers.find((x) => x.kind === 'settler' && x.faction === 'player' && x.role === 'settler' && !x.task && x.sprite.active);
     if (volunteer) {
       volunteer.role = role;
       volunteer.loaded = false;
@@ -2076,6 +2120,94 @@ export class GameScene extends Phaser.Scene {
       const nx = Phaser.Math.Clamp(cur.x + Phaser.Math.Between(-4, 4), 2, MAP - 3);
       const ny = Phaser.Math.Clamp(cur.y + Phaser.Math.Between(-4, 4), 2, MAP - 3);
       if (!this.sendWalker(w, nx, ny)) this.rest(w, 1 + Math.random() * 2);
+      return;
+    }
+    // Geólogo: va a la mina propia más pobre (reserva < 15) y la recarga.
+    if (w.task === 'geologo') {
+      const cur = this.walkerTile(w);
+      let best: { x: number; y: number } | null = null;
+      let bestD = Infinity;
+      for (const p of this.placed) {
+        if (p.owner !== 'player') continue;
+        if (p.id !== 'minaCarbon' && p.id !== 'minaHierro' && p.id !== 'minaOro') continue;
+        if ((this.mineReserves[`${p.tx},${p.ty}`] ?? 30) >= 15) continue;
+        const d = Math.abs(p.tx - cur.x) + Math.abs(p.ty - cur.y);
+        if (d < bestD) { bestD = d; best = { x: p.tx, y: p.ty }; }
+      }
+      if (!best) { this.stroll(w); return; }
+      const key = `${best.x},${best.y}`;
+      if (!this.sendWalker(w, best.x, best.y, () => {
+        w.state = 'work';
+        w.stateT = 4;
+        w.onArrive = () => {
+          const got = replenishReserve(this.mineReserves, key, 12);
+          if (got > 0) {
+            const { x, y } = this.iso(best!.x, best!.y);
+            dustBurst(this, x, y - 10);
+            floatText(this, x, y - 70, `+${got}⛏`);
+            playBlip('coin');
+          }
+          this.assignJob(w);
+        };
+        this.playWork(w);
+      })) this.stroll(w);
+      return;
+    }
+    // Pionero: cava fuera de la frontera y la expande (tope r14).
+    if (w.task === 'pionero') {
+      if (this.territoryRadius >= 14) { this.stroll(w); return; }
+      let target: GridPos | null = null;
+      for (let i = 0; i < 16 && !target; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const d = this.territoryRadius + 1 + Math.random() * 2;
+        const tx = Phaser.Math.Clamp(Math.round(this.center.x + Math.cos(a) * d), 2, MAP - 3);
+        const ty = Phaser.Math.Clamp(Math.round(this.center.y + Math.sin(a) * d), 2, MAP - 3);
+        if (this.walkableTile(tx, ty) && !this.buildingTiles.has(`${tx},${ty}`)) target = { x: tx, y: ty };
+      }
+      if (!target) { this.stroll(w); return; }
+      if (!this.sendWalker(w, target.x, target.y, () => {
+        w.state = 'work';
+        w.stateT = 5;
+        w.onArrive = () => {
+          this.territoryRadius = Math.min(14, this.territoryRadius + 0.4);
+          this.drawTerritoryPosts();
+          const { x, y } = this.iso(target!.x, target!.y);
+          dustBurst(this, x, y - 6);
+          floatText(this, x, y - 50, '🚩');
+          playBlip('coin');
+          this.rest(w, 18 + Math.random() * 8, () => this.assignJob(w));
+        };
+        this.playWork(w);
+      })) this.stroll(w);
+      return;
+    }
+    // Ladrón: roba al rival (máx 3) y revela su zona; luego se esconde.
+    if (w.task === 'ladron') {
+      const foes = this.placed.filter((p) => p.owner === 'rival');
+      if (!foes.length) { this.stroll(w); return; }
+      const cur = this.walkerTile(w);
+      let target = foes[0];
+      let bestD = Infinity;
+      for (const p of foes) {
+        const d = Math.abs(p.tx - cur.x) + Math.abs(p.ty - cur.y);
+        if (d < bestD) { bestD = d; target = p; }
+      }
+      if (!this.sendWalker(w, target.tx, target.ty, () => {
+        const pool = (['pan', 'oro', 'hierro', 'carbon', 'madera', 'herramienta'] as ResourceId[])
+          .filter((r) => (this.aiStock[r] ?? 0) > 2);
+        if (pool.length) {
+          const r = pool[Phaser.Math.Between(0, pool.length - 1)];
+          const n = Math.min(3, this.aiStock[r] ?? 0);
+          this.aiStock[r] -= n;
+          this.stock[r] = (this.stock[r] ?? 0) + n;
+          const { x, y } = this.iso(target.tx, target.ty);
+          floatText(this, x, y - 70, `+${n}`);
+          playBlip('coin');
+        }
+        revealCircle(this.fog, MAP, target.tx, target.ty, 6);
+        this.drawFog();
+        this.rest(w, 15 + Math.random() * 10, () => this.assignJob(w));
+      })) this.stroll(w);
       return;
     }
     // Explorador: camina a lo inexplorado y repite (revela r6 al andar).
@@ -2143,7 +2275,7 @@ export class GameScene extends Phaser.Scene {
         // hay paseo fake: patrulla corta hasta que haya carga.
         if (!almacen) { this.stroll(w); break; }
         const centralKey = `${almacen.tx},${almacen.ty}`;
-        const job = pickCarrierJob(this.transport, centralKey);
+        const job = pickCarrierJob(this.transport, centralKey, this.priorityOrder);
         if (!job) { this.stroll(w); break; }
         const [jx, jy] = job.fromKey.split(',').map(Number);
         w.loaded = false;
@@ -2470,6 +2602,10 @@ export class GameScene extends Phaser.Scene {
     const worker = this.add.image(30, -12, 'wl-carrier-e', 4).setScale(wlWorkerScale(42));
     c.add(worker);
     this.tweens.add({ targets: worker, y: -16, duration: 380, yoyo: true, repeat: 8 });
+    // Material a pie de obra que CRECE con el progreso (se ve levantar).
+    const material = this.add.image(-44, -8, id === 'cabanaLenador' || id === 'aserradero' ? 'logs' : 'crates')
+      .setScale(0.45).setAlpha(0.95);
+    c.add(material);
     if (owner === 'player') this.drawPath(x, y, depth - 1);
     // Barra de obra + polvo de construcción (el edificio "crece" de verdad).
     const bkey = `${tx},${ty}`;
@@ -2480,6 +2616,7 @@ export class GameScene extends Phaser.Scene {
     bar.fillRect(x - 29, y - 95, 1, 5);
     this.buildBars.set(bkey, bar);
     const buildMs = Math.min(def.tiempoConstruccionMs, 4000);
+    this.tweens.add({ targets: material, scale: 0.95, duration: buildMs });
     const barState = { t: 0 };
     this.tweens.add({
       targets: barState, t: 1, duration: buildMs,
@@ -2491,12 +2628,12 @@ export class GameScene extends Phaser.Scene {
         bar.fillRect(x - 29, y - 95, 58 * Math.min(1, barState.t), 5);
       },
     });
-    // Polvo de obra a mitad y al final (2 puffs acotados).
-    this.time.delayedCall(buildMs / 2, () => stepPuff(this, x - 10, y - 4));
+    // Polvo de obra a mitad y al final (2 puffs acotados) + martillo.
+    this.time.delayedCall(buildMs / 2, () => { stepPuff(this, x - 10, y - 4); playSfx('chop'); });
     this.tweens.add({
       targets: buildFx ? [buildFx] : [], alpha: 0, duration: buildMs,
       onComplete: () => {
-        buildFx?.destroy(); worker.destroy(); img.setAlpha(1); this.popIn(img, scale);
+        buildFx?.destroy(); worker.destroy(); material.destroy(); img.setAlpha(1); this.popIn(img, scale);
         this.buildBars.get(bkey)?.destroy();
         this.buildBars.delete(bkey);
         stepPuff(this, x + 8, y - 4);
@@ -2504,6 +2641,7 @@ export class GameScene extends Phaser.Scene {
         playBlip('coin');
         floatText(this, x, y - 70, '✓');
         builtBurst(this, x, y);
+        if (owner === 'player') this.emit(`✅ ${def.nombre} terminado`);
         if (id === 'puerto') this.spawnShip(tx, ty);
       },
     });
@@ -2660,6 +2798,7 @@ export class GameScene extends Phaser.Scene {
       this.mineReserves[key] = Math.max(0, (this.mineReserves[key] ?? 30) - n);
     }
     for (const key of prod.depletedKeys) {
+      if (!this.stallInfo.has(key)) this.emit('⛏ Veta agotada: manda un geólogo');
       this.stallInfo.set(key, ['⛏ veta agotada']);
       if (!this.stallMarks.has(key)) {
         const [tx, ty] = key.split(',').map(Number);
@@ -2683,6 +2822,7 @@ export class GameScene extends Phaser.Scene {
         const [fx, fy] = fromKey.split(',').map(Number);
         return roadDistance(this.roads, fx, fy, cx, cy);
       },
+      order: this.priorityOrder,
     });
     const flow = tickQueue(this.transport);
     for (const [k, v] of Object.entries(flow.deliveries)) {
@@ -2697,7 +2837,11 @@ export class GameScene extends Phaser.Scene {
       if (!rid) continue;
       const jkey = `${p.tx},${p.ty}`;
       let job = this.jobs.find((j) => j.key === jkey);
-      if (!job) { job = { recipeId: rid, edificio: p.id, progresoMs: 0, duracionMs: 8000, key: jkey }; this.jobs.push(job); }
+      if (!job) {
+        const ms = RECIPES.find((r) => r.id === rid)?.tiempoMs ?? 8000;
+        job = { recipeId: rid, edificio: p.id, progresoMs: 0, duracionMs: ms, key: jkey };
+        this.jobs.push(job);
+      }
       if (p.owner === 'rival') {
         const r = tickJob(this.aiStock, job, 1000);
         this.aiStock = r.stock;
@@ -2850,6 +2994,7 @@ export class GameScene extends Phaser.Scene {
         this.hintText?.setText('⚔ ¡Exploradores avistan otra colonia al otro lado!').setY(44);
         playSfx('sword');
         playBlip('horn');
+        this.emit('⚔ Colonia rival avistada');
         this.time.delayedCall(5000, () => this.hintText.setText(''));
       }
     }
@@ -2872,6 +3017,39 @@ export class GameScene extends Phaser.Scene {
     w.task = 'scout';
     w.speed = 88;
     this.assignJob(w);
+  }
+
+  /** Crea un especialista junto al almacén (con tope por oficio). */
+  private spawnSpecialist(task: SpecialistTask): boolean {
+    const def = SPECIALISTS[task];
+    const mine = this.placed.find((p) => p.owner === 'player' && p.id === 'almacen') ?? this.placed[0];
+    if (!mine) return false;
+    const crew = this.walkers.filter((x) => x.task === task && x.faction === 'player' && x.sprite.active).length;
+    if (crew >= def.tope) return false;
+    if (!canAfford(this.stock, def.coste)) return false;
+    this.stock = payCost(this.stock, def.coste);
+    const tx = Phaser.Math.Clamp(mine.tx + Phaser.Math.Between(-2, 2), 2, MAP - 3);
+    const ty = Phaser.Math.Clamp(mine.ty + Phaser.Math.Between(-2, 2), 2, MAP - 3);
+    const { x, y } = this.iso(tx, ty);
+    const s = this.add.sprite(x, y - 15, `wl-${def.base}-e`, 0).setDepth(8000);
+    s.setScale(wlWorkerScale(WL_WORKERS[def.base]?.dirs.e?.fh ?? 42));
+    s.setTint(def.tint);
+    if (this.anims.exists(`wl-walk-${def.base}-e`)) s.play(`wl-walk-${def.base}-e`);
+    const shadow = this.add.image(x, y - 1, 'shadow').setDepth(7999).setAlpha(0.6).setScale(1.2);
+    const w = this.makeWalker(s, shadow, def.base, 'settler');
+    w.task = task;
+    w.speed = def.speed;
+    recruitRing(this, x, y - 20);
+    playBlip('coin');
+    this.assignJob(w);
+    this.updateHud();
+    return true;
+  }
+
+  /** Entrena un especialista si hay hueco y recursos (puente UI). */
+  private train(task: SpecialistTask): boolean {
+    if (!SPECIALISTS[task]) return false;
+    return this.spawnSpecialist(task);
   }
 
   /** Destino scout: loseta inexplorada y pisable (20 intentos) o paseo. */
@@ -2950,7 +3128,7 @@ export class GameScene extends Phaser.Scene {
   /** Un colono hace las maletas y abandona la colonia por el borde. */
   private emigrateOne() {
     const leaver = this.walkers.find((w) =>
-      w.kind === 'settler' && w.faction === 'player' && w.sprite.active && w.role !== 'soldier' && w.role !== 'archer' && w.task !== 'scout');
+      w.kind === 'settler' && w.faction === 'player' && w.sprite.active && w.role !== 'soldier' && w.role !== 'archer' && !w.task);
     this.popCount = Math.max(0, this.popCount - 1);
     if (!leaver) return;
     // Deja lo que lleve y se va (al llegar se disuelve sin recontar).
@@ -3151,9 +3329,16 @@ export class GameScene extends Phaser.Scene {
         stalls: () => { id: BuildingId; nombre: string; tx: number; ty: number; faltan: string[] }[];
         transport: () => { waiting: number; inTransit: number; congested: number };
         map: () => { explored: number };
+        events: () => { id: number; text: string }[];
         siege: () => { nextWaveIn: number; wave: number; wavesToWin: number; repelled: number };
         quest: () => { step: number; complete: boolean; target: BuildingId | null; steps: { id: string; text: string; done: boolean }[] };
+        getPriority: () => ResourceId[];
+        setPriority: (order: ResourceId[]) => void;
+        specs: () => { geologo: number; pionero: number; ladron: number };
+        train: (task: string) => boolean;
         wave: () => number;
+        buildings: () => { id: BuildingId; tx: number; ty: number }[];
+        reserves: () => Record<string, number>;
         speed: () => number;
         setSpeed: (s: number) => void;
         stock: () => Stock;
@@ -3162,7 +3347,7 @@ export class GameScene extends Phaser.Scene {
         save: () => string | null;
         load: () => boolean;
         hasSave: () => string | null;
-        status: () => { status: string; wave: number; kills: number; buildings: number; timeSec: number; rival: number; aiBase: { x: number; y: number } | null; ai: { espada: number; pan: number; hierro: number; carbon: number; lingote: number; troops: number; raids: number } };
+        status: () => { status: string; wave: number; kills: number; buildings: number; timeSec: number; rival: number; mines: number; aiBase: { x: number; y: number } | null; ai: { espada: number; pan: number; hierro: number; carbon: number; lingote: number; troops: number; raids: number } };
         objectives: () => { id: string; text: string; done: boolean }[];
         inspect: (tx: number, ty: number) => {
           id: BuildingId; nombre: string; descripcion: string; categoria: string;
@@ -3219,6 +3404,11 @@ export class GameScene extends Phaser.Scene {
         inTransit: this.transport.queue.reduce((a, l) => a + l.amount, 0),
         congested: congestedKeys(this.transport, 6).length,
       }),
+      // TEMPORAL-diagnóstico jobs (quitar tras el fix).
+      // Hook QA: edificios propios (sondas; para verificar colocaciones).
+      buildings: () => this.placed.filter((p) => p.owner === 'player').map((p) => ({ id: p.id, tx: p.tx, ty: p.ty })),
+      // Hook QA: reservas de veta por loseta (sondas de balance).
+      reserves: () => ({ ...this.mineReserves }),
       // Hook QA: dispara una oleada ya (sondas; el reloj Phaser va en
       // slow-motion con SwiftShader/headless, en navegadores reales a 60fps va solo).
       wave: () => {
@@ -3226,6 +3416,19 @@ export class GameScene extends Phaser.Scene {
         return this.waveNo;
       },
       map: () => ({ explored: exploredPercent(this.fog) }),
+      events: () => this.eventLog.slice(-12).map((e) => ({ ...e })),
+      getPriority: () => [...this.priorityOrder],
+      setPriority: (order: ResourceId[]) => {
+        this.priorityOrder = sanitizeOrder(order);
+      },
+      specs: () => {
+        const count = (t: WalkerTask) => this.walkers.filter((w) => w.task === t && w.faction === 'player' && w.sprite.active).length;
+        return { geologo: count('geologo'), pionero: count('pionero'), ladron: count('ladron') };
+      },
+      train: (task: string) => {
+        if (task !== 'geologo' && task !== 'pionero' && task !== 'ladron') return false;
+        return this.train(task);
+      },
       siege: () => ({
         nextWaveIn: Math.max(0, Math.round((this.nextWaveAt - this.time.now) / 1000)),
         wave: this.waveNo,
@@ -3256,6 +3459,7 @@ export class GameScene extends Phaser.Scene {
         buildings: this.placed.length,
         timeSec: Math.floor((this.time.now - this.startTime) / 1000),
         rival: this.rivalBuildings().length,
+        mines: Object.values(this.mineReserves).reduce((a, b) => a + b, 0),
         aiBase: this.aiCenter ? { ...this.aiCenter } : null,
         ai: {
           espada: this.aiStock.espada, pan: this.aiStock.pan,

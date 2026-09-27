@@ -40,7 +40,7 @@ describe('población', () => {
 
   it('el apetito escala con la población', () => {
     expect(foodPerTick(0)).toBe(0);
-    expect(foodPerTick(20)).toBeCloseTo(0.1);
+    expect(foodPerTick(20)).toBeCloseTo(0.0667, 3);
     expect(foodPerTick(40)).toBeGreaterThan(foodPerTick(20));
   });
 });

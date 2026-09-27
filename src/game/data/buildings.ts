@@ -89,8 +89,8 @@ export interface Recipe {
 
 export const RECIPES: Recipe[] = [
   { id: 'tablon', edificio: 'aserradero', entradas: { madera: 2 }, salidas: { tablon: 1 }, tiempoMs: 8000 },
-  { id: 'harina', edificio: 'molino', entradas: { grano: 2 }, salidas: { harina: 1 }, tiempoMs: 8000 },
-  { id: 'pan', edificio: 'panaderia', entradas: { harina: 1, agua: 1 }, salidas: { pan: 1 }, tiempoMs: 9000 },
+  { id: 'harina', edificio: 'molino', entradas: { grano: 2 }, salidas: { harina: 1 }, tiempoMs: 6000 },
+  { id: 'pan', edificio: 'panaderia', entradas: { harina: 1, agua: 1 }, salidas: { pan: 1 }, tiempoMs: 6000 },
   { id: 'lingote-hierro', edificio: 'fundicion', entradas: { hierro: 2, carbon: 1 }, salidas: { lingoteHierro: 1 }, tiempoMs: 10000 },
   { id: 'lingote-oro', edificio: 'fundicion', entradas: { oro: 2, carbon: 1 }, salidas: { lingoteOro: 1 }, tiempoMs: 12000 },
   { id: 'herramienta', edificio: 'herreria', entradas: { lingoteHierro: 1, carbon: 1 }, salidas: { herramienta: 1 }, tiempoMs: 10000 },

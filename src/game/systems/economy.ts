@@ -45,9 +45,11 @@ export function tickAutoProducers(stock: Stock, buildingIds: BuildingId[], tickN
   for (const id of buildingIds) {
     const rule = AUTO_RULES[id];
     if (!rule) continue;
-    // Las minas comen un pan cada 4 ticks (si no, ni jugador ni IA podrían
-    // sostenerlas con la producción de una panadería: 1 pan/s es impagable).
-    if ((id === 'minaCarbon' || id === 'minaHierro' || id === 'minaOro') && tickNo % 4 !== 0) continue;
+    // Las minas comen un pan cada 12 ticks: 1 panadería (0.167/tick) sostiene
+    // censo inicial (0.067/tick) + 1 mina (0.083/tick) con margen para que el
+    // pan se acumule y las minas disparen; más minas o bocas exigen más
+    // panaderías (progresión real, misma regla para el rival).
+    if ((id === 'minaCarbon' || id === 'minaHierro' || id === 'minaOro') && tickNo % 12 !== 0) continue;
     if (!canAfford(next, rule.in)) continue;
     for (const [k, v] of Object.entries(rule.in)) next[k as ResourceId] -= v ?? 0;
     for (const [k, v] of Object.entries(rule.out)) next[k as ResourceId] += v ?? 0;
@@ -84,7 +86,7 @@ export function produceToBuffers(
     const rule = AUTO_RULES[p.id];
     if (!rule) continue;
     const isMine = p.id === 'minaCarbon' || p.id === 'minaHierro' || p.id === 'minaOro';
-    if (isMine && tickNo % 4 !== 0) continue;
+    if (isMine && tickNo % 12 !== 0) continue;
     // R1: veta agotada = la mina para y avisa (escasez real con coste).
     if (isMine && (p.reserve ?? Infinity) <= 0) {
       depletedKeys.push(p.key);
@@ -104,6 +106,22 @@ export function produceToBuffers(
     if (isMine && p.reserve !== undefined) consumed[p.key] = (consumed[p.key] ?? 0) + 1;
   }
   return { central: nextCentral, overflowKeys, depletedKeys, consumed };
+}
+
+/**
+ * Recarga la veta de una mina (geólogo): suma hasta el tope.
+ * Devuelve lo efectivamente recargado. Puro salvo el mapa que recibe.
+ */
+export function replenishReserve(
+  reserves: Record<string, number>,
+  key: string,
+  amount: number,
+  cap = 30,
+): number {
+  const cur = Math.max(0, reserves[key] ?? 0);
+  const next = Math.min(cap, cur + Math.max(0, amount));
+  reserves[key] = next;
+  return next - cur;
 }
 
 export function payCost(stock: Stock, cost: Partial<Record<ResourceId, number>>): Stock {

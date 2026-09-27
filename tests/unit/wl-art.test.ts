@@ -44,8 +44,8 @@ describe('arte Widelands (GPL)', () => {
     }
     for (const w of Object.values(WL_WORKERS)) {
       const s = wlWorkerScale(w.dirs.e?.fh ?? 42);
-      expect(s).toBeGreaterThanOrEqual(0.8);
-      expect(s).toBeLessThanOrEqual(1.5);
+      expect(s).toBeGreaterThanOrEqual(0.9);
+      expect(s).toBeLessThanOrEqual(1.6);
     }
   });
 

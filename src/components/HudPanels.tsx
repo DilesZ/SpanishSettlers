@@ -3,6 +3,8 @@
 // escriben window.__game; todos los flujos viven en src/app/play/page.tsx.
 
 import type { BuildingId, ResourceId } from '@/game/data/buildings';
+import { SPECIALISTS, type SpecialistTask } from '@/game/data/specialists';
+import { moveGroup, orderFromGroups, PRIORITY_GROUPS } from '@/game/systems/transport';
 import { iconFallback, iconFor, onImgFallback, resIconFor } from './hud-icons';
 import { Card, Chip, SectionTitle, Warn } from './ui';
 
@@ -481,6 +483,137 @@ export function InspectCard({ inspect, onClose, onRecruit }: InspectCardProps) {
         </button>
       </div>
     </section>
+  );
+}
+
+export interface SpecsInfo {
+  geologo: number;
+  pionero: number;
+  ladron: number;
+}
+
+/** Entrena especialistas (oficios del género con medios propios). */
+export function SpecialistsPanel({
+  specs,
+  stock,
+  onTrain,
+}: {
+  specs: SpecsInfo | null;
+  stock: Record<string, number> | null;
+  onTrain: (task: SpecialistTask) => void;
+}) {
+  const tasks = Object.values(SPECIALISTS);
+  return (
+    <section aria-label="Especialistas" className="rounded-2xl border border-amber-200/15 bg-[#101a12]/95 p-4 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]">
+      <SectionTitle>🎓 Especialistas</SectionTitle>
+      <div className="mt-2 grid grid-cols-1 gap-2">
+        {tasks.map((d) => {
+          const n = specs?.[d.task] ?? 0;
+          const full = n >= d.tope;
+          const costs = Object.entries(d.coste) as [string, number][];
+          const afford = !stock || costs.every(([k, v]) => (stock[k] ?? 0) >= v);
+          return (
+            <div key={d.task} className="flex items-center gap-2.5 rounded-xl border border-white/[0.08] bg-white/[0.04] p-2.5">
+              <span aria-hidden className="text-xl">{d.glyph}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-black text-amber-50">
+                  {d.label} <span className="font-bold text-amber-100/60 tabular-nums">{n}/{d.tope}</span>
+                </span>
+                <span className="block text-[11px] leading-4 text-amber-100/65">{d.descripcion}</span>
+                <span className="mt-1 block text-[11px] font-bold text-amber-100/80 tabular-nums">
+                  {costs.map(([k, v]) => `${v}× ${k}`).join(' + ')}
+                </span>
+              </span>
+              <button
+                onClick={() => onTrain(d.task)}
+                disabled={full || !afford}
+                title={full ? 'Tope alcanzado' : `Entrenar ${d.label}`}
+                className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-black transition ${
+                  full || !afford
+                    ? 'cursor-not-allowed border-white/10 text-amber-100/40'
+                    : 'border-amber-300/60 bg-amber-300/15 text-amber-100 hover:brightness-110'
+                }`}
+              >
+                {full ? 'Tope' : '＋'}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/** Editor de prioridad de mercancías (el jugador ordena, como el original). */
+export function PriorityEditor({
+  order,
+  onChange,
+}: {
+  order: ResourceId[] | null;
+  onChange: (order: ResourceId[]) => void;
+}) {
+  const pos = (r: ResourceId) => {
+    const i = (order ?? []).indexOf(r);
+    return i < 0 ? 99 : i;
+  };
+  const groups = [...PRIORITY_GROUPS].sort(
+    (a, b) => Math.min(...a.resources.map(pos)) - Math.min(...b.resources.map(pos)),
+  );
+  return (
+    <section aria-label="Prioridad de mercancías" className="rounded-2xl border border-amber-200/15 bg-[#101a12]/95 p-4 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]">
+      <SectionTitle>📦 Prioridad de porteadores</SectionTitle>
+      <ol className="mt-2 space-y-1.5">
+        {groups.map((gd, i) => (
+          <li key={gd.id} className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5">
+            <span className="w-5 shrink-0 text-center text-xs font-black text-amber-200 tabular-nums">{i + 1}</span>
+            <span className="min-w-0 flex-1 truncate text-xs font-bold text-amber-50">
+              {gd.label} <span className="font-semibold text-amber-100/55">· {gd.resources.join(', ')}</span>
+            </span>
+            <button
+              onClick={() => onChange(orderFromGroups(moveGroup(groups, i, -1)))}
+              disabled={i === 0}
+              aria-label={`Subir ${gd.label}`}
+              className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-amber-100/80 transition hover:border-amber-200/40 disabled:opacity-30"
+            >
+              ▲
+            </button>
+            <button
+              onClick={() => onChange(orderFromGroups(moveGroup(groups, i, 1)))}
+              disabled={i === groups.length - 1}
+              aria-label={`Bajar ${gd.label}`}
+              className="rounded-full border border-white/10 px-2 py-0.5 text-xs text-amber-100/80 transition hover:border-amber-200/40 disabled:opacity-30"
+            >
+              ▼
+            </button>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+export interface TickerEvent {
+  id: number;
+  text: string;
+}
+
+/** Cinta de avisos (lo último arriba, textos propios del juego). */
+export function EventTicker({ events }: { events: TickerEvent[] }) {
+  if (!events.length) return null;
+  const last = events.slice(-4).reverse();
+  return (
+    <div
+      role="log"
+      aria-label="Avisos"
+      aria-live="polite"
+      className="mt-3 space-y-1 rounded-2xl border border-amber-200/15 bg-[#101a12]/95 px-3 py-2 shadow-[0_16px_40px_-24px_rgba(0,0,0,0.9)]"
+    >
+      {last.map((e) => (
+        <p key={e.id} className="truncate text-xs leading-5 text-amber-50/85">
+          {e.text}
+        </p>
+      ))}
+    </div>
   );
 }
 

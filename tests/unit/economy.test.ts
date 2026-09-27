@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canAfford, createInitialStock, militaryStrengthFactor, missingInputs, payCost, produceToBuffers, settlementValue, tickAutoProducers, tickJob, type Stock } from '@/game/systems/economy';
+import { canAfford, createInitialStock, militaryStrengthFactor, missingInputs, payCost, produceToBuffers, replenishReserve, settlementValue, tickAutoProducers, tickJob, type Stock } from '@/game/systems/economy';
 
 describe('economia', () => {
   it('stock inicial tiene madera y herramientas', () => {
@@ -58,13 +58,22 @@ describe('economia', () => {
   it('la mina agota su veta y avisa (escasez R1)', () => {
     const buffers: Record<string, Partial<Record<never, number>>> = {};
     const central: Stock = { ...createInitialStock(), pan: 99 };
-    // Las minas producen en ticks múltiplos de 4 y comen pan.
-    const r1 = produceToBuffers(buffers, [{ id: 'minaHierro', key: '3,3', reserve: 1 }], central, 4);
+    // Las minas producen en ticks múltiplos de 12 y comen pan.
+    const r1 = produceToBuffers(buffers, [{ id: 'minaHierro', key: '3,3', reserve: 1 }], central, 12);
     expect(r1.depletedKeys).not.toContain('3,3');
     expect(r1.consumed['3,3']).toBe(1);
-    const r2 = produceToBuffers(buffers, [{ id: 'minaHierro', key: '3,3', reserve: 0 }], r1.central, 8);
+    const r2 = produceToBuffers(buffers, [{ id: 'minaHierro', key: '3,3', reserve: 0 }], r1.central, 24);
     expect(r2.depletedKeys).toContain('3,3');
     expect(r2.consumed['3,3'] ?? 0).toBe(0);
+  });
+
+  it('el geólogo recarga la veta hasta el tope', () => {
+    const r: Record<string, number> = { '3,3': 4 };
+    expect(replenishReserve(r, '3,3', 12)).toBe(12);
+    expect(r['3,3']).toBe(16);
+    expect(replenishReserve(r, '3,3', 99)).toBe(14);
+    expect(r['3,3']).toBe(30);
+    expect(replenishReserve(r, '9,9', 5)).toBe(5);
   });
 
   it('sin reserva la producción es infinita como antes', () => {
@@ -75,11 +84,11 @@ describe('economia', () => {
     expect((buffers['1,1'] as Record<string, number>).madera).toBe(2);
   });
 
-  it('las minas solo trabajan 1 de cada 4 ticks (pan sostenible)', () => {
+  it('las minas solo trabajan 1 de cada 12 ticks (pan sostenible)', () => {
     const base = { ...createInitialStock(), hierro: 0, pan: 10 };
     expect(tickAutoProducers(base, ['minaHierro'], 1).hierro).toBe(0);
-    expect(tickAutoProducers(base, ['minaHierro'], 2).hierro).toBe(0);
-    const s = tickAutoProducers(base, ['minaHierro'], 4);
+    expect(tickAutoProducers(base, ['minaHierro'], 10).hierro).toBe(0);
+    const s = tickAutoProducers(base, ['minaHierro'], 12);
     expect(s.hierro).toBe(2);
     expect(s.pan).toBe(9);
   });

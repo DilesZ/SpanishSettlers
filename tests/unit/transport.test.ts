@@ -3,10 +3,15 @@ import {
   bufferTotal,
   congestedKeys,
   createTransportState,
+  moveGroup,
+  orderFromGroups,
   pickCarrierJob,
+  PRIORITY_GROUPS,
   pushOutput,
   requestShipments,
+  sanitizeOrder,
   tickQueue,
+  TRANSPORT_PRIORITY,
 } from '@/game/systems/transport';
 
 describe('transporte causal (council Fase 1)', () => {
@@ -66,6 +71,32 @@ describe('transporte causal (council Fase 1)', () => {
     const d1 = tickQueue(s);
     expect(d1.deliveries.madera).toBe(2);
     expect(s.queue).toHaveLength(0);
+  });
+
+  it('el orden del jugador manda sobre el defecto', () => {
+    const s = createTransportState();
+    pushOutput(s, '1,1', 'madera', 4);
+    pushOutput(s, '2,2', 'pan', 2);
+    const metalFirst = [...TRANSPORT_PRIORITY].sort((a, b) =>
+      (a === 'madera' ? 0 : 1) - (b === 'madera' ? 0 : 1),
+    );
+    const { moved } = requestShipments(s, {
+      bandwidth: 2,
+      centralKey: '0,0',
+      distanceOf: () => ({ connected: true, distance: 0 }),
+      order: metalFirst,
+    });
+    expect(moved[0].resource).toBe('madera');
+  });
+
+  it('mover grupos ▲▼ y sanear órdenes', () => {
+    const gs = PRIORITY_GROUPS.map((g) => g.id);
+    expect(moveGroup(gs, 0, -1)).toEqual(gs);
+    expect(moveGroup(gs, 0, 1)[0]).toBe('madera');
+    expect(orderFromGroups(PRIORITY_GROUPS).slice(0, 5)).toEqual(['pan', 'pez', 'harina', 'grano', 'agua']);
+    expect(sanitizeOrder(['espada', 'nope', 'espada'])[0]).toBe('espada');
+    expect(sanitizeOrder(null)).toEqual(TRANSPORT_PRIORITY);
+    expect(sanitizeOrder(['pan']).length).toBe(TRANSPORT_PRIORITY.length);
   });
 
   it('el porteador visible recoge trabajo causal (no fake)', () => {
