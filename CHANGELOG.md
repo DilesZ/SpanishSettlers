@@ -2,6 +2,12 @@
 
 Todos los cambios documentados por checkpoint (tags `v*`).
 
+## [sin tag] — Nuevo motor gráfico 3D (vista viva)
+- `/3d` jugable con Three.js y arte propio: misma sim (economía, transporte,
+  recetas, A*), colonos con oficios, día/noche, picking y obra con coste.
+- Ver `docs/devlog/042-motor-3d.md`.
+- Verificación: 170 unit, tsc limpio, build OK, e2e 4/4, lint sin nuevos.
+
 ## [sin tag] — Balance comida-metal + playtest total
 - Minas cada 12 ticks, censo pop/300, recetas con tiempos reales: la cadena
   del metal arranca con 1-2 panaderías y escala con más.
